@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>아르케온 왕국 — 계승 분쟁</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
+
+    <div class="page">
+      <section id="crisis-panel" class="panel crisis-panel" aria-label="현재 위기"></section>
+
+      <aside id="info-legend" class="panel legend-panel" aria-label="정보 상태 안내"></aside>
+
+      <main id="main-content" class="main-flow">
+        <section class="panel section-block" aria-labelledby="candidates-heading">
+          <div class="section-head">
+            <h2 id="candidates-heading">후계 후보</h2>
+            <p class="section-help">카드를 선택하면 권리·강점·약점과 정보 상태를 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
+          </div>
+          <div id="candidate-list" class="candidate-list"></div>
+          <div id="candidate-detail" class="candidate-detail panel-inset" aria-live="polite"></div>
+        </section>
+
+        <section class="panel section-block" aria-labelledby="houses-heading">
+          <div class="section-head">
+            <h2 id="houses-heading">유력 가문 입장</h2>
+            <p class="section-help">가문을 선택하면 지지 또는 미결정 이유(긍정·부정)가 표시됩니다. 내부 점수는 표시하지 않습니다.</p>
+          </div>
+          <div id="house-list" class="house-list"></div>
+          <div id="house-detail" class="house-detail panel-inset" aria-live="polite"></div>
+        </section>
+
+        <section class="panel section-block player-section" aria-labelledby="player-heading">
+          <div class="section-head">
+            <h2 id="player-heading">플레이어 위치</h2>
+            <p class="section-help">가문 의무, 개인 관계, 상충하는 압력 사이에 놓여 있습니다. 수락·거부 행동은 이 화면에서 제공하지 않습니다.</p>
+          </div>
+          <div id="player-panel" class="player-panel"></div>
+        </section>
+      </main>
+
+      <footer class="page-footer">
+        <p>EPOCH M-1.1 — 고정 계승 분쟁 이해 화면 (정적 수직 슬라이스). 선택·거래·시간 진행 없음.</p>
+      </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
