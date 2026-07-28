@@ -334,11 +334,27 @@ function renderHouseDetail() {
     <div class="detail-columns">
       <section class="detail-block reasons-positive">
         <h3>주요 긍정 이유</h3>
-        <ul>${detail.positiveReasons.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+        <ul>${detail.positiveReasons
+          .map(
+            (r) => `
+          <li class="info-item info-${escapeHtml(r.visibility)}">
+            ${visibilityBadge(r.visibility)}
+            <p>${escapeHtml(r.text)}</p>
+          </li>`,
+          )
+          .join('')}</ul>
       </section>
       <section class="detail-block reasons-negative">
         <h3>주요 부정 이유</h3>
-        <ul>${detail.negativeReasons.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+        <ul>${detail.negativeReasons
+          .map(
+            (r) => `
+          <li class="info-item info-${escapeHtml(r.visibility)}">
+            ${visibilityBadge(r.visibility)}
+            <p>${escapeHtml(r.text)}</p>
+          </li>`,
+          )
+          .join('')}</ul>
       </section>
     </div>
   `;

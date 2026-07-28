@@ -163,24 +163,29 @@ export const scenario = {
         {
           code: 'support_military_title_promise',
           text: '다리안은 아르덴 가문에 동부 변경백 직위를 약속했다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_military_link',
           text: '아르덴 가문의 군사력이 다리안의 북부군과 직접 연결돼 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_land_dispute_fear',
           text: '가문 수장은 세리아가 즉위하면 기존 영지 분쟁에서 불리해질 것으로 판단한다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
       negativeReasons: [
         {
           code: 'oppose_weaker_legal_claim',
           text: '다리안의 법적 권리가 세리아보다 약해 내전 위험이 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'oppose_duplicate_title_rumor',
           text: '약속된 직위를 다른 지지 가문도 요구하고 있다는 소문이 있다.',
+          visibility: /** @type {InformationVisibility} */ ('unverified'),
         },
       ],
     },
@@ -193,24 +198,29 @@ export const scenario = {
         {
           code: 'support_legal_heir',
           text: '세리아는 현행 계승법상 가장 앞선 직계 후계자다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_admin_office',
           text: '바렌 가문은 왕실 행정 직위를 유지하려 한다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_marriage_tie',
           text: '바렌 가문의 후계자는 세리아의 가까운 친족과 혼인했다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
       negativeReasons: [
         {
           code: 'oppose_weak_military',
           text: '세리아에게 즉시 동원할 군사력이 부족하다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'oppose_religion_friction',
           text: '세리아의 종교가 일부 바렌 봉신들의 반발을 일으킬 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
     },
@@ -223,24 +233,29 @@ export const scenario = {
         {
           code: 'support_shared_faith',
           text: '다리안은 소렌 가문과 같은 종교를 따른다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_northern_protection',
           text: '다리안의 군대가 소렌 가문의 북부 영지를 보호하고 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_religious_office_fear',
           text: '소렌 가문은 세리아가 즉위하면 종교 직위가 제한될 것을 우려한다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
       negativeReasons: [
         {
           code: 'oppose_legal_order_break',
           text: '다리안의 즉위가 법적 계승 질서를 무너뜨릴 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'oppose_shared_title_suspicion',
           text: '다리안이 아르덴 가문에도 같은 핵심 직위를 약속했다는 의심이 있다.',
+          visibility: /** @type {InformationVisibility} */ ('unverified'),
         },
       ],
     },
@@ -253,24 +268,29 @@ export const scenario = {
         {
           code: 'support_old_oath',
           text: '메로바 가문은 폐위된 알레시아 계통에 충성을 맹세한 기록을 보유한다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_land_restoration',
           text: '미레아가 즉위하면 과거 몰수된 메로바 영지를 돌려받을 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_foreign_trade',
           text: '국외 동맹과의 교역 재개를 기대한다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
       negativeReasons: [
         {
           code: 'oppose_weak_domestic_base',
           text: '미레아의 국내 군사 기반이 약하다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'oppose_treason_label',
           text: '외국 후원에 의존하면 메로바 가문도 반역자로 규정될 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
     },
@@ -283,20 +303,24 @@ export const scenario = {
         {
           code: 'support_port_leverage',
           text: '세 후보 모두 할베크 가문의 항구와 함대가 필요하다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'support_neutrality_bargain',
           text: '중립을 유지하면 더 큰 조건을 요구할 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
       negativeReasons: [
         {
           code: 'oppose_opportunist_label',
           text: '결정을 늦추면 승리한 후보에게 기회주의자로 인식될 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
         {
           code: 'oppose_neutral_port_attack',
           text: '내전이 시작되면 중립 항구도 공격 대상이 될 수 있다.',
+          visibility: /** @type {InformationVisibility} */ ('public_fact'),
         },
       ],
     },
@@ -452,7 +476,20 @@ export function getCandidateDetail(candidateId) {
 }
 
 /**
- * 가문 상세 모델 (이유 문장만 — 코드·점수 미포함).
+ * 가문 이유 객체를 화면용 모델로 변환 (코드·점수 미포함, 가시성 라벨 포함).
+ * @param {{ text: string, visibility?: InformationVisibility }} reason
+ */
+function mapReasonForView(reason) {
+  const visibility = reason.visibility ?? 'public_fact';
+  return {
+    text: reason.text,
+    visibility,
+    visibilityLabel: VISIBILITY_LABELS[visibility] ?? visibility,
+  };
+}
+
+/**
+ * 가문 상세 모델 (이유 문장 + 가시성 라벨 — 코드·점수 미포함).
  * @param {string} houseId
  */
 export function getHouseDetail(houseId) {
@@ -473,8 +510,8 @@ export function getHouseDetail(houseId) {
           : '미결정',
     supportCandidateId: house.supportCandidateId,
     supportCandidateName: supported ? supported.name : null,
-    positiveReasons: house.positiveReasons.map((r) => r.text),
-    negativeReasons: house.negativeReasons.map((r) => r.text),
+    positiveReasons: house.positiveReasons.map(mapReasonForView),
+    negativeReasons: house.negativeReasons.map(mapReasonForView),
   };
 }
 
@@ -553,19 +590,35 @@ export function containsInternalLeak(text) {
   return codePatterns.some((re) => re.test(text));
 }
 
+/** 뷰 모델 내부 키 — 화면에 그대로 노출하지 않음 */
+const NON_USER_FACING_KEYS = new Set([
+  'id',
+  'visibility',
+  'supportStatus',
+  'supportCandidateId',
+  'type',
+  'supporterCount',
+]);
+
 /**
  * 상세 모델의 모든 사용자 노출 문자열을 평탄화.
+ * 내부 ID·가시성 코드 등은 제외한다.
  * @param {object} detail
  */
 export function flattenUserFacingStrings(detail) {
   if (!detail) return [];
   const out = [];
-  const walk = (v) => {
+  const walk = (v, key) => {
+    if (key && NON_USER_FACING_KEYS.has(key)) return;
     if (typeof v === 'string') out.push(v);
-    else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    else if (typeof v === 'number' || typeof v === 'boolean') {
+      /* 원시 수치·불리언은 사용자 문장으로 취급하지 않음 */
+    } else if (Array.isArray(v)) v.forEach((item) => walk(item, null));
+    else if (v && typeof v === 'object') {
+      for (const [k, val] of Object.entries(v)) walk(val, k);
+    }
   };
-  walk(detail);
+  walk(detail, null);
   return out;
 }
 

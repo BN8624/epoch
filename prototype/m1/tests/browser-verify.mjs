@@ -78,6 +78,21 @@ class Cdp {
     return r.result.value;
   }
 
+  async key(key, code, windowsVirtualKeyCode) {
+    await this.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key,
+      code,
+      windowsVirtualKeyCode,
+    });
+    await this.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key,
+      code,
+      windowsVirtualKeyCode,
+    });
+  }
+
   close() {
     this.ws.close();
   }
@@ -147,53 +162,94 @@ try {
       hasUnverifiedBadge: !!document.querySelector('.badge-unverified'),
       ariaNames: [...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
         .map(el => el.getAttribute('aria-label')).filter(Boolean).length,
-      minTouch: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
+      touchTargets: [...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
+        .map(el => {
+          const r = el.getBoundingClientRect();
+          return { w: r.width, h: r.height, tag: el.className };
+        }),
+      minTouchW: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
+        .map(el => el.getBoundingClientRect().width)),
+      minTouchH: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
         .map(el => el.getBoundingClientRect().height)),
+      layoutIssues: (() => {
+        const issues = [];
+        const vw = window.innerWidth;
+        const core = [...document.querySelectorAll(
+          '.candidate-card,.house-card,#player-toggle,#candidate-detail,#house-detail,.crisis-facts,h1,h2'
+        )];
+        for (const el of core) {
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          if (r.width > 0 && r.right > vw + 1) issues.push('overflow-x:' + (el.className || el.id || el.tagName));
+          if (style.overflow === 'hidden' || style.overflowX === 'hidden' || style.overflowY === 'hidden') {
+            if (el.scrollWidth > el.clientWidth + 2) issues.push('clipped-x:' + (el.className || el.id || el.tagName));
+            if (el.scrollHeight > el.clientHeight + 2 && el.clientHeight > 0 && style.overflowY === 'hidden') {
+              issues.push('clipped-y:' + (el.className || el.id || el.tagName));
+            }
+          }
+        }
+        // 카드 간 겹침 검사
+        const cards = [...document.querySelectorAll('.candidate-card,.house-card')];
+        for (let i = 0; i < cards.length; i++) {
+          for (let j = i + 1; j < cards.length; j++) {
+            const a = cards[i].getBoundingClientRect();
+            const b = cards[j].getBoundingClientRect();
+            const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (overlapX > 2 && overlapY > 2) {
+              issues.push('overlap:' + i + '-' + j);
+            }
+          }
+        }
+        return issues;
+      })(),
     })`);
   }
 
   const desktop = await measure(1280, 720);
 
-  await cdp.eval(`document.querySelectorAll('.candidate-card')[1].click()`);
-  await sleep(250);
-  const afterB = await cdp.eval(`({
-    selected: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
-    detailTitle: document.querySelector('#candidate-detail-title')?.textContent,
-  })`);
+  // --- 후보 A·B·C 명시 선택 및 상세 검증 ---
+  const candidateExpect = [
+    { index: 0, name: '세리아 아르케온' },
+    { index: 1, name: '다리안 코르벤' },
+    { index: 2, name: '미레아 셀칸' },
+  ];
+  const candidateClicks = [];
+  for (const exp of candidateExpect) {
+    await cdp.eval(`document.querySelectorAll('.candidate-card')[${exp.index}].click()`);
+    await sleep(200);
+    candidateClicks.push(
+      await cdp.eval(`({
+        selected: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
+        selectedCount: document.querySelectorAll('.candidate-card.is-selected').length,
+        detailTitle: document.querySelector('#candidate-detail-title')?.textContent,
+        hasClaim: !!document.querySelector('#candidate-detail .detail-block'),
+        infoCount: document.querySelectorAll('#candidate-detail .info-list li').length,
+      })`),
+    );
+  }
 
-  await cdp.eval(`document.querySelectorAll('.candidate-card')[2].click()`);
-  await sleep(250);
-  const afterC = await cdp.eval(`({
-    selected: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
-    detailTitle: document.querySelector('#candidate-detail-title')?.textContent,
-  })`);
-
-  await cdp.eval(`document.querySelector('[data-house-id="house-merova"]').click()`);
-  await sleep(250);
-  const afterHouse = await cdp.eval(`({
-    selected: document.querySelector('.house-card.is-selected .card-name')?.textContent,
-    detailTitle: document.querySelector('#house-detail-title')?.textContent,
-    positiveCount: document.querySelectorAll('.reasons-positive li').length,
-    negativeCount: document.querySelectorAll('.reasons-negative li').length,
-  })`);
-
-  // all five houses
-  const houseIds = [
-    'house-arden',
-    'house-barren',
-    'house-soren',
-    'house-merova',
-    'house-halbeck',
+  // --- 다섯 가문 각각 선택·상세·이유 검증 ---
+  const houseExpect = [
+    { id: 'house-arden', name: '아르덴 가문', stanceHas: '다리안' },
+    { id: 'house-barren', name: '바렌 가문', stanceHas: '세리아' },
+    { id: 'house-soren', name: '소렌 가문', stanceHas: '다리안' },
+    { id: 'house-merova', name: '메로바 가문', stanceHas: '미레아' },
+    { id: 'house-halbeck', name: '할베크 가문', stanceHas: '미결정' },
   ];
   const houseClicks = [];
-  for (const id of houseIds) {
-    await cdp.eval(`document.querySelector('[data-house-id="${id}"]').click()`);
+  for (const exp of houseExpect) {
+    await cdp.eval(`document.querySelector('[data-house-id="${exp.id}"]').click()`);
     await sleep(150);
     houseClicks.push(
       await cdp.eval(`({
-        id: '${id}',
+        id: '${exp.id}',
+        selected: document.querySelector('.house-card.is-selected .card-name')?.textContent,
+        selectedCount: document.querySelectorAll('.house-card.is-selected').length,
         title: document.querySelector('#house-detail-title')?.textContent,
         stance: document.querySelector('.house-stance-large')?.textContent?.replace(/\\s+/g,' ').trim(),
+        positiveCount: document.querySelectorAll('.reasons-positive li').length,
+        negativeCount: document.querySelectorAll('.reasons-negative li').length,
       })`),
     );
   }
@@ -207,23 +263,48 @@ try {
     privateBadges: document.querySelectorAll('.badge-private').length,
   })`);
 
-  await cdp.eval(`document.querySelector('.candidate-card.is-selected')?.focus()`);
-  await cdp.send('Input.dispatchKeyEvent', {
-    type: 'keyDown',
-    key: 'ArrowRight',
-    code: 'ArrowRight',
-    windowsVirtualKeyCode: 39,
-  });
-  await cdp.send('Input.dispatchKeyEvent', {
-    type: 'keyUp',
-    key: 'ArrowRight',
-    code: 'ArrowRight',
-    windowsVirtualKeyCode: 39,
-  });
+  // --- 키보드: 후보 탐색 ---
+  // 후보 A(세리아) 선택 후 포커스, ArrowRight → B
+  await cdp.eval(`document.querySelectorAll('.candidate-card')[0].click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelectorAll('.candidate-card')[0].focus()`);
+  await cdp.key('ArrowRight', 'ArrowRight', 39);
   await sleep(250);
-  const afterKey = await cdp.eval(`({
+  const afterCandidateKey = await cdp.eval(`({
     selected: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
-    activeClass: document.activeElement?.className,
+    detailTitle: document.querySelector('#candidate-detail-title')?.textContent,
+    activeClass: document.activeElement?.className || '',
+    activeIsCandidate: document.activeElement?.classList?.contains('candidate-card') || false,
+  })`);
+
+  // ArrowRight again → C
+  await cdp.key('ArrowRight', 'ArrowRight', 39);
+  await sleep(200);
+  const afterCandidateKey2 = await cdp.eval(`({
+    selected: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
+    detailTitle: document.querySelector('#candidate-detail-title')?.textContent,
+    activeIsCandidate: document.activeElement?.classList?.contains('candidate-card') || false,
+  })`);
+
+  // --- 키보드: 가문 탐색 ---
+  await cdp.eval(`document.querySelector('[data-house-id="house-arden"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('[data-house-id="house-arden"]').focus()`);
+  await cdp.key('ArrowRight', 'ArrowRight', 39);
+  await sleep(250);
+  const afterHouseKey = await cdp.eval(`({
+    selected: document.querySelector('.house-card.is-selected .card-name')?.textContent,
+    title: document.querySelector('#house-detail-title')?.textContent,
+    activeIsHouse: document.activeElement?.classList?.contains('house-card') || false,
+    positiveCount: document.querySelectorAll('.reasons-positive li').length,
+  })`);
+
+  await cdp.key('ArrowRight', 'ArrowRight', 39);
+  await sleep(200);
+  const afterHouseKey2 = await cdp.eval(`({
+    selected: document.querySelector('.house-card.is-selected .card-name')?.textContent,
+    title: document.querySelector('#house-detail-title')?.textContent,
+    activeIsHouse: document.activeElement?.classList?.contains('house-card') || false,
   })`);
 
   const mobile = await measure(390, 664);
@@ -234,12 +315,13 @@ try {
 
   const result = {
     desktop,
-    afterB,
-    afterC,
-    afterHouse,
+    candidateClicks,
     houseClicks,
     afterPlayer,
-    afterKey,
+    afterCandidateKey,
+    afterCandidateKey2,
+    afterHouseKey,
+    afterHouseKey2,
     mobile,
     consoleLogCount: cdp.console.length,
     consoleErrors,
@@ -253,14 +335,90 @@ try {
   if (desktop.candidateCount !== 3) failures.push('candidate count');
   if (desktop.houseCount !== 5) failures.push('house count');
   if (desktop.titles?.c1 !== '세리아 아르케온') failures.push('candidate A name');
-  if (afterB.selected !== '다리안 코르벤') failures.push('select B');
-  if (afterC.selected !== '미레아 셀칸') failures.push('select C');
-  if (afterHouse.selected !== '메로바 가문') failures.push('select merova');
+  if (desktop.titles?.c2 !== '다리안 코르벤') failures.push('candidate B name');
+  if (desktop.titles?.c3 !== '미레아 셀칸') failures.push('candidate C name');
+
+  for (let i = 0; i < candidateExpect.length; i++) {
+    const exp = candidateExpect[i];
+    const got = candidateClicks[i];
+    if (got?.selected !== exp.name) failures.push(`select candidate ${exp.name}`);
+    if (got?.detailTitle !== exp.name) failures.push(`detail title ${exp.name}`);
+    if (got?.selectedCount !== 1) failures.push(`candidate single selection ${exp.name}`);
+    if (!got?.hasClaim) failures.push(`candidate claim missing ${exp.name}`);
+    if (!(got?.infoCount >= 1)) failures.push(`candidate info missing ${exp.name}`);
+  }
+
+  for (let i = 0; i < houseExpect.length; i++) {
+    const exp = houseExpect[i];
+    const got = houseClicks[i];
+    if (got?.selected !== exp.name) failures.push(`select house ${exp.name}`);
+    if (got?.title !== exp.name) failures.push(`house title ${exp.name}`);
+    if (got?.selectedCount !== 1) failures.push(`house single selection ${exp.name}`);
+    if (!got?.stance?.includes(exp.stanceHas)) {
+      failures.push(`house stance ${exp.name} expected ${exp.stanceHas} got ${got?.stance}`);
+    }
+    if (!(got?.positiveCount >= 1)) failures.push(`house positive reasons ${exp.name}`);
+    if (!(got?.negativeCount >= 1)) failures.push(`house negative reasons ${exp.name}`);
+  }
+
   if (afterPlayer.relations !== 3) failures.push('player relations');
   if (afterPlayer.pressures !== 3) failures.push('player pressures');
+  if (afterPlayer.expanded !== 'true') failures.push('player expand');
+
+  // 키보드 후보: A → ArrowRight → B
+  if (afterCandidateKey.selected !== '다리안 코르벤') {
+    failures.push(`keyboard candidate select B got ${afterCandidateKey.selected}`);
+  }
+  if (afterCandidateKey.detailTitle !== '다리안 코르벤') {
+    failures.push('keyboard candidate detail B');
+  }
+  if (!afterCandidateKey.activeIsCandidate) {
+    failures.push('keyboard candidate focus after arrow');
+  }
+  if (afterCandidateKey2.selected !== '미레아 셀칸') {
+    failures.push(`keyboard candidate select C got ${afterCandidateKey2.selected}`);
+  }
+  if (afterCandidateKey2.detailTitle !== '미레아 셀칸') {
+    failures.push('keyboard candidate detail C');
+  }
+
+  // 키보드 가문: 아르덴 → ArrowRight → 바렌 → ArrowRight → 소렌
+  if (afterHouseKey.selected !== '바렌 가문') {
+    failures.push(`keyboard house select barren got ${afterHouseKey.selected}`);
+  }
+  if (afterHouseKey.title !== '바렌 가문') {
+    failures.push('keyboard house detail barren');
+  }
+  if (!afterHouseKey.activeIsHouse) {
+    failures.push('keyboard house focus after arrow');
+  }
+  if (!(afterHouseKey.positiveCount >= 1)) {
+    failures.push('keyboard house reasons updated');
+  }
+  if (afterHouseKey2.selected !== '소렌 가문') {
+    failures.push(`keyboard house select soren got ${afterHouseKey2.selected}`);
+  }
+  if (afterHouseKey2.title !== '소렌 가문') {
+    failures.push('keyboard house detail soren');
+  }
+
   if (consoleErrors.length) failures.push('console errors');
-  if (desktop.minTouch < 40) failures.push('touch target too small');
+
+  // 터치 대상: 데스크톱·모바일 모두 최소 44px (너비·높이)
+  if (desktop.minTouchH < 44) failures.push(`desktop touch height ${desktop.minTouchH}`);
+  if (desktop.minTouchW < 44) failures.push(`desktop touch width ${desktop.minTouchW}`);
+  if (mobile.minTouchH < 44) failures.push(`mobile touch height ${mobile.minTouchH}`);
+  if (mobile.minTouchW < 44) failures.push(`mobile touch width ${mobile.minTouchW}`);
+
+  if (desktop.layoutIssues?.length) {
+    failures.push(`desktop layout: ${desktop.layoutIssues.join(';')}`);
+  }
+  if (mobile.layoutIssues?.length) {
+    failures.push(`mobile layout: ${mobile.layoutIssues.join(';')}`);
+  }
+
   if (desktop.ariaNames < 8) failures.push('missing aria names');
+  if (mobile.ariaNames < 8) failures.push('mobile missing aria names');
 
   cdp.close();
   chrome.kill();

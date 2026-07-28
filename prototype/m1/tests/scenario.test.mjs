@@ -75,7 +75,6 @@ describe('Fixture 불변식', () => {
     for (const [cid, n] of byCandidate) {
       assert.ok(n < declared.length, `${cid} monopolizes all declared support`);
     }
-    // 미결정 가문이 있으면 이미 독점 불가; declared 전체가 한 후보인지도 금지
     assert.ok(byCandidate.size >= 2, 'at least two candidates have house support');
   });
 
@@ -85,25 +84,59 @@ describe('Fixture 불변식', () => {
       assert.ok(h.negativeReasons.length >= 1, h.id);
       for (const r of h.positiveReasons) {
         assert.ok(r.code && r.text, h.id);
+        assert.ok(
+          ['public_fact', 'unverified', 'private'].includes(r.visibility),
+          `${h.id} positive reason missing visibility`,
+        );
       }
       for (const r of h.negativeReasons) {
         assert.ok(r.code && r.text, h.id);
+        assert.ok(
+          ['public_fact', 'unverified', 'private'].includes(r.visibility),
+          `${h.id} negative reason missing visibility`,
+        );
       }
     }
   });
 
+  it('아르덴·소렌의 소문·의심 이유는 unverified이다', () => {
+    const ardenRumor = scenario.houses
+      .find((h) => h.id === 'house-arden')
+      .negativeReasons.find((r) => r.code === 'oppose_duplicate_title_rumor');
+    assert.equal(ardenRumor.visibility, 'unverified');
+    const sorenSuspicion = scenario.houses
+      .find((h) => h.id === 'house-soren')
+      .negativeReasons.find((r) => r.code === 'oppose_shared_title_suspicion');
+    assert.equal(sorenSuspicion.visibility, 'unverified');
+  });
+
   it('모든 불확실한 정보에는 불확실함을 나타내는 상태가 있다', () => {
-    let unverifiedCount = 0;
     for (const c of scenario.candidates) {
       for (const info of c.information) {
         assert.ok(
           ['public_fact', 'unverified', 'private'].includes(info.visibility),
           info.id,
         );
-        if (info.visibility === 'unverified') unverifiedCount += 1;
       }
     }
-    assert.ok(unverifiedCount >= 3, 'each candidate should have unverified info');
+    for (const h of scenario.houses) {
+      for (const r of [...h.positiveReasons, ...h.negativeReasons]) {
+        assert.ok(
+          ['public_fact', 'unverified', 'private'].includes(r.visibility),
+          `${h.id}:${r.code}`,
+        );
+      }
+    }
+  });
+
+  it('각 후보별로 확인되지 않은 정보가 최소 하나 있다', () => {
+    for (const c of scenario.candidates) {
+      const unverified = c.information.filter((i) => i.visibility === 'unverified');
+      assert.ok(
+        unverified.length >= 1,
+        `${c.id} must have at least one unverified information item`,
+      );
+    }
   });
 
   it('플레이어는 세 후보 진영과 각각 다른 관계 또는 압력을 가진다', () => {
@@ -148,18 +181,30 @@ describe('표현 로직', () => {
     }
   });
 
-  it('가문 선택 시 해당 가문의 이유 문장이 반환된다', () => {
+  it('가문 선택 시 해당 가문의 이유 문장과 가시성 라벨이 반환된다', () => {
     for (const h of scenario.houses) {
       const detail = getHouseDetail(h.id);
       assert.ok(detail);
       assert.equal(detail.id, h.id);
       assert.ok(detail.positiveReasons.length >= 1);
       assert.ok(detail.negativeReasons.length >= 1);
-      for (const t of detail.positiveReasons) {
-        assert.equal(typeof t, 'string');
-        assert.match(t, /[.。]$|[다요음]$|[다]$/);
+      for (const r of [...detail.positiveReasons, ...detail.negativeReasons]) {
+        assert.equal(typeof r.text, 'string');
+        assert.ok(r.visibilityLabel);
+        assert.ok(Object.values(VISIBILITY_LABELS).includes(r.visibilityLabel));
+        assert.match(r.text, /[.。]$|[다요음]$|[다]$/);
       }
     }
+    const arden = getHouseDetail('house-arden');
+    const rumor = arden.negativeReasons.find((r) => r.text.includes('소문'));
+    assert.ok(rumor);
+    assert.equal(rumor.visibility, 'unverified');
+    assert.equal(rumor.visibilityLabel, '확인되지 않은 정보');
+    const soren = getHouseDetail('house-soren');
+    const suspicion = soren.negativeReasons.find((r) => r.text.includes('의심'));
+    assert.ok(suspicion);
+    assert.equal(suspicion.visibility, 'unverified');
+    assert.equal(suspicion.visibilityLabel, '확인되지 않은 정보');
   });
 
   it('존재하지 않는 ID를 선택해도 앱이 중단되지 않는다', () => {
@@ -171,64 +216,24 @@ describe('표현 로직', () => {
     assert.deepEqual(getSupportingHouses('missing'), []);
   });
 
-  it('내부 이유 코드가 그대로 사용자 화면 문자열에 노출되지 않는다', () => {
-    const userStrings = [];
-    for (const c of scenario.candidates) {
-      const d = getCandidateDetail(c.id);
-      userStrings.push(
-        d.name,
-        d.claimBasis,
-        d.claimStrengthText,
-        d.claimTypeLabel,
-        ...d.strengths,
-        ...d.weaknesses,
-        ...d.oppositionReasons,
-        ...d.supportingHouses.map((h) => h.name),
-        ...d.information.map((i) => i.text),
-        ...d.information.map((i) => i.visibilityLabel),
-      );
-    }
-    for (const h of scenario.houses) {
-      const d = getHouseDetail(h.id);
-      userStrings.push(
-        d.name,
-        d.supportStatusLabel,
-        d.supportCandidateName ?? '',
-        ...d.positiveReasons,
-        ...d.negativeReasons,
-      );
-    }
-    const player = getPlayerView();
-    userStrings.push(
-      player.name,
-      player.status,
-      player.claimText,
-      player.houseStanceText,
-      ...player.relationships.map((r) => r.text),
-      ...player.pressures.map((p) => p.text),
-      ...player.pressures.map((p) => p.visibilityLabel),
-    );
-    const crisis = getCrisisView();
-    userStrings.push(
-      crisis.kingdomName,
-      crisis.rulerName,
-      crisis.healthStatus,
-      crisis.authorityStatus,
-      crisis.successionDeclaration,
-      crisis.civilWarRisk,
-    );
-
+  it('렌더링되는 모든 뷰 모델에 내부 코드·원시 효용이 노출되지 않는다', () => {
+    const models = [
+      getCrisisView(),
+      getPlayerView(),
+      ...scenario.candidates.map((c) => getCandidateSummary(c.id)),
+      ...scenario.candidates.map((c) => getCandidateDetail(c.id)),
+      ...scenario.houses.map((h) => getHouseDetail(h.id)),
+    ];
+    const userStrings = models.flatMap((m) => flattenUserFacingStrings(m));
+    assert.ok(userStrings.length > 0);
     for (const s of userStrings) {
-      if (!s) continue;
-      assert.equal(
-        containsInternalLeak(s),
-        false,
-        `internal leak in: ${s}`,
-      );
+      assert.equal(containsInternalLeak(s), false, `internal leak in: ${s}`);
       assert.doesNotMatch(s, /support_[a-z_]+/);
       assert.doesNotMatch(s, /oppose_[a-z_]+/);
       assert.doesNotMatch(s, /legal_primogeniture|collateral_blood|ancient_line/);
       assert.doesNotMatch(s, /support_reason_code|opposition_reason_code/);
+      assert.doesNotMatch(s, /[+\-]\d+(\.\d+)?\b/);
+      assert.doesNotMatch(s, /utility|score|효용/i);
     }
   });
 
@@ -248,10 +253,9 @@ describe('표현 로직', () => {
     }
     for (const h of scenario.houses) {
       const d = getHouseDetail(h.id);
-      for (const t of [...d.positiveReasons, ...d.negativeReasons]) {
-        assert.doesNotMatch(t, /[+\-]\d+(\.\d+)?\b/);
+      for (const r of [...d.positiveReasons, ...d.negativeReasons]) {
+        assert.doesNotMatch(r.text, /[+\-]\d+(\.\d+)?\b/);
       }
-      // 모델 자체에 utility 필드 없음
       assert.equal('utility' in d, false);
       assert.equal('score' in d, false);
     }
@@ -284,5 +288,8 @@ describe('표현 로직', () => {
     const flat = flattenUserFacingStrings(d);
     assert.ok(flat.length > 0);
     assert.ok(flat.every((s) => typeof s === 'string'));
+    assert.ok(!flat.includes('public_fact'));
+    assert.ok(!flat.includes('unverified'));
+    assert.ok(flat.includes('확인되지 않은 정보'));
   });
 });
