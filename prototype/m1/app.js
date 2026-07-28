@@ -102,21 +102,22 @@ function renderCandidateList() {
     );
     btn.dataset.candidateId = cand.id;
     btn.tabIndex = selected ? 0 : -1;
+    // 버튼 내부는 phrasing content(span)만 사용하고 블록 배치는 CSS로 처리한다
     btn.innerHTML = `
-      <div class="card-top">
+      <span class="card-top">
         <span class="card-label">${escapeHtml(summary.label)}</span>
         ${selected ? '<span class="selected-mark" aria-hidden="true">선택됨</span>' : ''}
-      </div>
-      <h3 class="card-name">${escapeHtml(summary.name)}</h3>
-      <p class="card-relation">${escapeHtml(summary.relationshipToRuler)}</p>
-      <p class="card-claim"><span class="field-label">권리</span> ${escapeHtml(summary.claimStrengthText)}</p>
-      <p class="card-strength"><span class="field-label">강점</span> ${escapeHtml(summary.keyStrength)}</p>
-      <p class="card-risk"><span class="field-label">위험</span> ${escapeHtml(summary.keyRisk)}</p>
-      <p class="card-support"><span class="field-label">공개 지지</span> ${summary.supporterCount}개 가문${
+      </span>
+      <span class="card-name">${escapeHtml(summary.name)}</span>
+      <span class="card-relation">${escapeHtml(summary.relationshipToRuler)}</span>
+      <span class="card-claim"><span class="field-label">권리</span> ${escapeHtml(summary.claimStrengthText)}</span>
+      <span class="card-strength"><span class="field-label">강점</span> ${escapeHtml(summary.keyStrength)}</span>
+      <span class="card-risk"><span class="field-label">위험</span> ${escapeHtml(summary.keyRisk)}</span>
+      <span class="card-support"><span class="field-label">공개 지지</span> ${summary.supporterCount}개 가문${
         summary.supporterNames.length
           ? ` · ${escapeHtml(summary.supporterNames.join(', '))}`
           : ''
-      }</p>
+      }</span>
     `;
     btn.addEventListener('click', () => selectCandidate(cand.id));
     btn.addEventListener('keydown', (e) => onCandidateKeydown(e, index));
@@ -260,15 +261,16 @@ function renderHouseList() {
     );
     btn.dataset.houseId = house.id;
     btn.tabIndex = selected ? 0 : -1;
+    // 버튼 내부는 phrasing content(span)만 사용하고 블록 배치는 CSS로 처리한다
     btn.innerHTML = `
-      <div class="card-top">
-        <h3 class="card-name">${escapeHtml(detail.name)}</h3>
+      <span class="card-top">
+        <span class="card-name">${escapeHtml(detail.name)}</span>
         ${selected ? '<span class="selected-mark" aria-hidden="true">선택됨</span>' : ''}
-      </div>
-      <p class="house-stance">
+      </span>
+      <span class="house-stance">
         <span class="field-label">입장</span>
         ${escapeHtml(detail.supportStatusLabel)}
-      </p>
+      </span>
     `;
     btn.addEventListener('click', () => selectHouse(house.id));
     btn.addEventListener('keydown', (e) => onHouseKeydown(e, index));
@@ -397,16 +399,16 @@ function renderPlayer() {
       aria-expanded="${expanded ? 'true' : 'false'}"
       aria-controls="player-details"
       aria-label="플레이어 ${escapeHtml(player.name)} 정보 ${expanded ? '접기' : '펼치기'}">
-      <div class="player-summary">
-        <p class="eyebrow">플레이어</p>
-        <h2>${escapeHtml(player.name)}</h2>
-        <p>${escapeHtml(player.status)}</p>
-        <p class="meta-line"><span class="field-label">직위</span> ${escapeHtml(player.office)}</p>
-        <p class="meta-line"><span class="field-label">영지</span> ${escapeHtml(player.holding)}</p>
-        <p class="meta-line"><span class="field-label">권리</span> ${escapeHtml(player.claimText)}</p>
-        <p class="meta-line house-stance-line">${escapeHtml(player.houseStanceText)}</p>
+      <span class="player-summary">
+        <span class="eyebrow">플레이어</span>
+        <span class="player-name">${escapeHtml(player.name)}</span>
+        <span class="player-status">${escapeHtml(player.status)}</span>
+        <span class="meta-line"><span class="field-label">직위</span> ${escapeHtml(player.office)}</span>
+        <span class="meta-line"><span class="field-label">영지</span> ${escapeHtml(player.holding)}</span>
+        <span class="meta-line"><span class="field-label">권리</span> ${escapeHtml(player.claimText)}</span>
+        <span class="meta-line house-stance-line">${escapeHtml(player.houseStanceText)}</span>
         <span class="expand-hint" aria-hidden="true">${expanded ? '▲ 접기' : '▼ 관계와 압력 보기'}</span>
-      </div>
+      </span>
     </button>
     <div id="player-details" class="player-details${expanded ? ' is-open' : ''}" ${expanded ? '' : 'hidden'}>
       <section class="detail-block">
