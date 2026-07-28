@@ -1,19 +1,88 @@
-// 헤드리스 Chrome CDP로 레이아웃·상호작용·콘솔 검증 (의존성 없음)
+// 정적 서버와 Chrome을 직접 띄워 레이아웃·상호작용·의미구조·콘솔을 검증한다 (의존성 없음)
 import { spawn } from 'child_process';
 import http from 'http';
+import fsp from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { resolveChromePath, chromeNotFoundMessage } from './chrome-path.mjs';
 
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const PORT = 9223;
-const URL = 'http://127.0.0.1:8765/';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SITE_ROOT = path.resolve(HERE, '..');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+};
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function getJson(path) {
+// ---------- 정적 서버 (OS가 할당한 포트 사용) ----------
+function startStaticServer(root) {
+  const server = http.createServer(async (req, res) => {
+    try {
+      const rawPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      const rel = rawPath === '/' ? 'index.html' : rawPath.replace(/^\/+/, '');
+      const target = path.resolve(root, rel);
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        res.writeHead(403).end('forbidden');
+        return;
+      }
+      const body = await fsp.readFile(target);
+      res.writeHead(200, { 'content-type': MIME[path.extname(target)] ?? 'application/octet-stream' });
+      res.end(body);
+    } catch {
+      res.writeHead(404).end('not found');
+    }
+  });
+
+  return new Promise((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({ server, port, url: `http://127.0.0.1:${port}/` });
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => {
+    if (!server) {
+      resolve();
+      return;
+    }
+    server.closeAllConnections?.();
+    server.close(() => resolve());
+  });
+}
+
+// Chrome이 --remote-debugging-port=0으로 실제 할당한 포트를 읽는다
+async function readDevToolsPort(userDataDir, timeoutMs = 20000) {
+  const portFile = path.join(userDataDir, 'DevToolsActivePort');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const text = await fsp.readFile(portFile, 'utf8');
+      const port = parseInt(text.split('\n')[0].trim(), 10);
+      if (Number.isInteger(port) && port > 0) return port;
+    } catch {
+      /* 아직 생성되지 않음 */
+    }
+    await sleep(150);
+  }
+  throw new Error(`Chrome did not report a DevTools port within ${timeoutMs}ms (${portFile}).`);
+}
+
+function getJson(port, urlPath) {
   return new Promise((resolve, reject) => {
     http
-      .get(`http://127.0.0.1:${PORT}${path}`, (res) => {
+      .get(`http://127.0.0.1:${port}${urlPath}`, (res) => {
         let d = '';
         res.on('data', (c) => {
           d += c;
@@ -79,60 +148,119 @@ class Cdp {
   }
 
   async key(key, code, windowsVirtualKeyCode) {
-    await this.send('Input.dispatchKeyEvent', {
-      type: 'keyDown',
-      key,
-      code,
-      windowsVirtualKeyCode,
-    });
-    await this.send('Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      key,
-      code,
-      windowsVirtualKeyCode,
-    });
+    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode });
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode });
   }
 
   close() {
-    this.ws.close();
+    try {
+      this.ws.close();
+    } catch {
+      /* 이미 닫힘 */
+    }
   }
 }
 
-const chrome = spawn(
-  CHROME,
-  [
-    `--remote-debugging-port=${PORT}`,
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--window-size=1280,720',
-    'about:blank',
-  ],
-  { stdio: 'ignore' },
-);
+// ---------- 자원 ----------
+let site = null;
+let chrome = null;
+let cdp = null;
+let userDataDir = null;
+
+async function cleanup() {
+  if (cdp) cdp.close();
+  if (chrome && chrome.exitCode === null) {
+    chrome.kill();
+    for (let i = 0; i < 20 && chrome.exitCode === null; i++) await sleep(100);
+    if (chrome.exitCode === null) chrome.kill('SIGKILL');
+  }
+  await closeServer(site?.server);
+  if (userDataDir) {
+    try {
+      await fsp.rm(userDataDir, { recursive: true, force: true, maxRetries: 5 });
+    } catch {
+      /* 임시 디렉터리 정리 실패는 검증 결과를 바꾸지 않는다 */
+    }
+  }
+}
+
+const failures = [];
 
 try {
-  await sleep(900);
-  let pages;
+  site = await startStaticServer(SITE_ROOT);
+
+  const chromeInfo = resolveChromePath();
+  if (!chromeInfo.path) throw new Error(chromeNotFoundMessage(chromeInfo.tried));
+
+  userDataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'epoch-m1-chrome-'));
+  chrome = spawn(
+    chromeInfo.path,
+    [
+      '--remote-debugging-port=0',
+      `--user-data-dir=${userDataDir}`,
+      '--headless=new',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--window-size=1280,720',
+      'about:blank',
+    ],
+    { stdio: 'ignore' },
+  );
+
+  const devtoolsPort = await readDevToolsPort(userDataDir);
+
+  let pages = null;
   for (let i = 0; i < 25; i++) {
     try {
-      pages = await getJson('/json/list');
+      pages = await getJson(devtoolsPort, '/json/list');
       if (pages.length) break;
     } catch {
-      /* retry */
+      /* 재시도 */
     }
     await sleep(200);
   }
-  if (!pages?.length) throw new Error('No CDP pages');
+  if (!pages?.length) throw new Error(`No CDP pages on port ${devtoolsPort}.`);
 
   const page = pages.find((p) => p.type === 'page') || pages[0];
-  const cdp = new Cdp(page.webSocketDebuggerUrl);
+  cdp = new Cdp(page.webSocketDebuggerUrl);
   await cdp.ready();
   await cdp.send('Runtime.enable');
   await cdp.send('Page.enable');
-  await cdp.send('Page.navigate', { url: URL });
-  await sleep(1500);
+  await cdp.send('Page.navigate', { url: site.url });
+
+  // --- 페이지 준비 대기: 후보 3, 가문 5, 플레이어 토글 1 ---
+  const readyDeadline = Date.now() + 20000;
+  let readyState = null;
+  while (Date.now() < readyDeadline) {
+    readyState = await cdp.eval(`({
+      candidates: document.querySelectorAll('.candidate-card').length,
+      houses: document.querySelectorAll('.house-card').length,
+      playerToggle: document.querySelectorAll('#player-toggle').length,
+      documentState: document.readyState,
+      bodyLength: (document.body?.innerText || '').length,
+    })`);
+    if (readyState.candidates === 3 && readyState.houses === 5 && readyState.playerToggle === 1) break;
+    await sleep(200);
+  }
+  if (!(readyState?.candidates === 3 && readyState?.houses === 5 && readyState?.playerToggle === 1)) {
+    const consoleDump = cdp.console
+      .filter((c) => c.type === 'error' || c.type === 'exception' || c.exceptionDetails)
+      .map((c) => JSON.stringify(c))
+      .join('\n');
+    throw new Error(
+      [
+        'Page did not become ready in time.',
+        `  url: ${site.url}`,
+        `  candidate cards: ${readyState?.candidates ?? 'n/a'} (expected 3)`,
+        `  house cards: ${readyState?.houses ?? 'n/a'} (expected 5)`,
+        `  player toggle: ${readyState?.playerToggle ?? 'n/a'} (expected 1)`,
+        `  document.readyState: ${readyState?.documentState ?? 'n/a'}`,
+        `  page load failed: ${(readyState?.bodyLength ?? 0) === 0 ? 'yes' : 'no'}`,
+        `  console errors:${consoleDump ? '\n' + consoleDump : ' none'}`,
+      ].join('\n'),
+    );
+  }
 
   async function measure(w, h) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -149,14 +277,14 @@ try {
       hasHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       candidateCount: document.querySelectorAll('.candidate-card').length,
       houseCount: document.querySelectorAll('.house-card').length,
-      selectedCandidate: document.querySelector('.candidate-card.is-selected .card-name')?.textContent || null,
-      selectedHouse: document.querySelector('.house-card.is-selected .card-name')?.textContent || null,
+      selectedCandidate: document.querySelector('.candidate-card.is-selected .card-name')?.textContent,
+      selectedHouse: document.querySelector('.house-card.is-selected .card-name')?.textContent,
       titles: {
         ruler: document.querySelector('.crisis-facts dd')?.textContent,
         c1: document.querySelectorAll('.candidate-card .card-name')[0]?.textContent,
         c2: document.querySelectorAll('.candidate-card .card-name')[1]?.textContent,
         c3: document.querySelectorAll('.candidate-card .card-name')[2]?.textContent,
-        player: document.querySelector('#player-panel h2')?.textContent,
+        player: document.querySelector('#player-panel .player-name')?.textContent,
       },
       hasPublicBadge: !!document.querySelector('.badge-public'),
       hasUnverifiedBadge: !!document.querySelector('.badge-unverified'),
@@ -207,6 +335,22 @@ try {
   }
 
   const desktop = await measure(1280, 720);
+
+  // --- 버튼 의미 구조 검증 ---
+  const semantics = await cdp.eval(`(() => {
+    const FORBIDDEN = ['DIV','P','H1','H2','H3','H4','H5','H6','SECTION','ARTICLE','BUTTON','A','INPUT','SELECT','TEXTAREA'];
+    const inspect = (selector, kind) => [...document.querySelectorAll(selector)].map((el, index) => ({
+      kind,
+      index,
+      tag: el.tagName,
+      forbidden: [...new Set([...el.querySelectorAll('*')].map(n => n.tagName).filter(t => FORBIDDEN.includes(t)))],
+    }));
+    return [
+      ...inspect('.candidate-card', 'candidate'),
+      ...inspect('.house-card', 'house'),
+      ...inspect('#player-toggle', 'player'),
+    ];
+  })()`);
 
   // --- 후보 A·B·C 명시 선택 및 상세 검증 ---
   const candidateExpect = [
@@ -264,7 +408,6 @@ try {
   })`);
 
   // --- 키보드: 후보 탐색 ---
-  // 후보 A(세리아) 선택 후 포커스, ArrowRight → B
   await cdp.eval(`document.querySelectorAll('.candidate-card')[0].click()`);
   await sleep(150);
   await cdp.eval(`document.querySelectorAll('.candidate-card')[0].focus()`);
@@ -277,7 +420,6 @@ try {
     activeIsCandidate: document.activeElement?.classList?.contains('candidate-card') || false,
   })`);
 
-  // ArrowRight again → C
   await cdp.key('ArrowRight', 'ArrowRight', 39);
   await sleep(200);
   const afterCandidateKey2 = await cdp.eval(`({
@@ -314,6 +456,9 @@ try {
   );
 
   const result = {
+    chrome: { path: chromeInfo.path, source: chromeInfo.source },
+    server: { url: site.url, port: site.port },
+    semantics,
     desktop,
     candidateClicks,
     houseClicks,
@@ -329,7 +474,6 @@ try {
 
   console.log(JSON.stringify(result, null, 2));
 
-  const failures = [];
   if (desktop.hasHScroll) failures.push('desktop horizontal scroll');
   if (mobile.hasHScroll) failures.push('mobile horizontal scroll');
   if (desktop.candidateCount !== 3) failures.push('candidate count');
@@ -337,6 +481,18 @@ try {
   if (desktop.titles?.c1 !== '세리아 아르케온') failures.push('candidate A name');
   if (desktop.titles?.c2 !== '다리안 코르벤') failures.push('candidate B name');
   if (desktop.titles?.c3 !== '미레아 셀칸') failures.push('candidate C name');
+  if (desktop.titles?.player !== '렌 아르덴') failures.push('player name');
+
+  // 버튼 의미 구조
+  if (semantics.filter((s) => s.kind === 'candidate').length !== 3) failures.push('semantics candidate count');
+  if (semantics.filter((s) => s.kind === 'house').length !== 5) failures.push('semantics house count');
+  if (semantics.filter((s) => s.kind === 'player').length !== 1) failures.push('semantics player count');
+  for (const s of semantics) {
+    if (s.tag !== 'BUTTON') failures.push(`${s.kind}[${s.index}] is ${s.tag}, expected BUTTON`);
+    if (s.forbidden.length) {
+      failures.push(`${s.kind}[${s.index}] contains forbidden element(s): ${s.forbidden.join(',')}`);
+    }
+  }
 
   for (let i = 0; i < candidateExpect.length; i++) {
     const exp = candidateExpect[i];
@@ -419,18 +575,16 @@ try {
 
   if (desktop.ariaNames < 8) failures.push('missing aria names');
   if (mobile.ariaNames < 8) failures.push('mobile missing aria names');
-
-  cdp.close();
-  chrome.kill();
-
-  if (failures.length) {
-    console.error('FAILURES:', failures.join(', '));
-    process.exit(1);
-  }
-  console.log('BROWSER_VERIFY_OK');
-  process.exit(0);
 } catch (err) {
+  failures.push(`execution error: ${err?.message ?? err}`);
   console.error(err);
-  chrome.kill();
+} finally {
+  await cleanup();
+}
+
+if (failures.length) {
+  console.error('FAILURES:', failures.join(', '));
   process.exit(1);
 }
+console.log('BROWSER_VERIFY_OK');
+process.exit(0);
