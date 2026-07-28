@@ -1,0 +1,11 @@
+{
+  "name": "epoch-m1-prototype",
+  "private": true,
+  "type": "module",
+  "description": "EPOCH M-1.1 static browser prototype (no runtime dependencies)",
+  "scripts": {
+    "test": "node --test tests/scenario.test.mjs",
+    "verify:browser": "node tests/browser-verify.mjs",
+    "verify": "node --test tests/scenario.test.mjs && node tests/browser-verify.mjs"
+  }
+}
