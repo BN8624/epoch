@@ -36,14 +36,35 @@
         <section class="panel section-block player-section" aria-labelledby="player-heading">
           <div class="section-head">
             <h2 id="player-heading">플레이어 위치</h2>
-            <p class="section-help">가문 의무, 개인 관계, 상충하는 압력 사이에 놓여 있습니다. 수락·거부 행동은 이 화면에서 제공하지 않습니다.</p>
+            <p class="section-help">가문 의무, 개인 관계, 상충하는 압력 사이에 놓여 있습니다. 아래 제안과 행동에서 한 가지를 선택할 수 있습니다.</p>
           </div>
           <div id="player-panel" class="player-panel"></div>
+        </section>
+
+        <section class="panel section-block" id="proposals-section" aria-labelledby="proposals-heading">
+          <div class="section-head">
+            <h2 id="proposals-heading">상충하는 제안</h2>
+            <p class="section-help">세 진영의 요구를 펼쳐 확인하십시오. 모든 제안을 동시에 받아들일 수는 없습니다.</p>
+          </div>
+          <div id="proposal-list" class="proposal-list"></div>
+        </section>
+
+        <section class="panel section-block" id="actions-section" aria-labelledby="actions-heading">
+          <div class="section-head">
+            <h2 id="actions-heading">플레이어 행동</h2>
+            <p class="section-help">행동 하나를 고른 뒤 확인 단계에서 확정합니다. 카드만으로 즉시 결과가 나지 않습니다.</p>
+          </div>
+          <div id="action-list" class="action-list"></div>
+          <div id="confirm-panel" class="confirm-panel panel-inset" hidden></div>
+        </section>
+
+        <section class="panel section-block" id="outcome-section" aria-labelledby="outcome-heading" hidden>
+          <div id="outcome-panel" class="outcome-panel" tabindex="-1"></div>
         </section>
       </main>
 
       <footer class="page-footer">
-        <p>EPOCH M-1.1 — 고정 계승 분쟁 이해 화면 (정적 수직 슬라이스). 선택·거래·시간 진행 없음.</p>
+        <p>EPOCH M-1.2 — 상충 제안·선택·즉시 결과 고정 수직 슬라이스. 장기 시뮬레이션 없음.</p>
       </footer>
     </div>
 

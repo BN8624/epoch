@@ -2,10 +2,13 @@
   "name": "epoch-m1-prototype",
   "private": true,
   "type": "module",
-  "description": "EPOCH M-1.1 static browser prototype (no runtime dependencies)",
+  "description": "EPOCH M-1.2 browser prototype: proposals, choices, fixed outcomes (no runtime dependencies)",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "test": "node --test tests/scenario.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "verify:browser": "node tests/browser-verify.mjs",
-    "verify": "node --test tests/scenario.test.mjs && node tests/browser-verify.mjs"
+    "verify": "node --test tests/*.test.mjs && node tests/browser-verify.mjs"
   }
 }
