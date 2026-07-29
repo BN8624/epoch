@@ -1,5 +1,6 @@
 // 최소 세계 상태와 도메인 값 타입
 
+use crate::error::CoreError;
 use crate::rng::DeterministicRng;
 use serde::{Deserialize, Serialize};
 
@@ -146,15 +147,25 @@ impl WorldState {
             .count()
     }
 
-    pub fn allocate_event_id(&mut self) -> u64 {
+    /// 다음 사건 ID를 할당한다. 기존 사건과 충돌하거나 오버플로하면 상태를 바꾸지 않고 오류를 반환한다.
+    pub fn allocate_event_id(&mut self) -> Result<u64, CoreError> {
         let id = self.next_event_id;
-        self.next_event_id = self.next_event_id.saturating_add(1);
-        id
+        if self.events.iter().any(|e| e.event_id == id) {
+            return Err(CoreError::EventIdCollision { event_id: id });
+        }
+        let next = id.checked_add(1).ok_or(CoreError::EventIdOverflow)?;
+        self.next_event_id = next;
+        Ok(id)
     }
 
-    pub fn allocate_command_sequence(&mut self) -> u64 {
+    /// 명령 sequence 카운터를 한 칸 전진시킨다. 오버플로 시 상태를 바꾸지 않는다.
+    /// 스케줄 등록은 Scheduler가 담당하며, 이 메서드는 동기화·직접 할당용이다.
+    pub fn allocate_command_sequence(&mut self) -> Result<u64, CoreError> {
         let seq = self.next_command_sequence;
-        self.next_command_sequence = self.next_command_sequence.saturating_add(1);
-        seq
+        let next = seq
+            .checked_add(1)
+            .ok_or(CoreError::CommandSequenceOverflow)?;
+        self.next_command_sequence = next;
+        Ok(seq)
     }
 }

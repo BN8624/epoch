@@ -6,37 +6,11 @@ use epoch_core::{
 use std::path::PathBuf;
 use std::process::Command;
 
-fn epoch_lab_bin() -> PathBuf {
-    // workspace target/debug (또는 release) 에서 epoch-lab 바이너리 탐색
+/// 현재 소스에서 빌드된 바이너리만 검사하도록 항상 cargo run을 사용한다.
+fn run_epoch_lab(args: &[&str]) -> std::process::Output {
     let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     root.pop(); // crates
     root.pop(); // workspace root
-    let exe_name = if cfg!(windows) {
-        "epoch-lab.exe"
-    } else {
-        "epoch-lab"
-    };
-    for profile in ["debug", "release"] {
-        let candidate = root.join("target").join(profile).join(exe_name);
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    // 없으면 cargo run으로 빌드되도록 debug 경로를 반환 (호출 측에서 cargo로 fallback)
-    root.join("target").join("debug").join(exe_name)
-}
-
-fn run_epoch_lab(args: &[&str]) -> std::process::Output {
-    let bin = epoch_lab_bin();
-    if bin.exists() {
-        return Command::new(&bin)
-            .args(args)
-            .output()
-            .unwrap_or_else(|e| panic!("failed to run {}: {e}", bin.display()));
-    }
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.pop();
-    root.pop();
     Command::new("cargo")
         .current_dir(&root)
         .args(["run", "-q", "-p", "epoch-lab", "--"])
@@ -185,20 +159,63 @@ fn all_caused_by_reference_prior_events() {
 #[test]
 fn influence_path_length_matches_chain() {
     let result = run_demo(1).expect("demo");
-    for e in &result.events {
-        for link in &e.influence_links {
-            match link.contribution_class {
-                ContributionClass::Direct => {
-                    assert_eq!(link.path_length, 1);
-                    assert_eq!(link.top_contributors.len(), 1);
-                }
-                ContributionClass::Mediated => {
-                    assert_eq!(link.path_length, 2);
-                    assert_eq!(link.top_contributors.len(), 2);
-                }
-            }
-        }
+    let action = result
+        .events
+        .iter()
+        .find(|e| e.event_type == "player_action_recorded")
+        .expect("action");
+    assert!(action.caused_by.is_none());
+    assert!(action.influence_links.is_empty());
+
+    // 즉시 상태 변경: caused_by=행동, direct, path_length 1, 단일 기여자=행동
+    for et in [
+        "player_stance_changed",
+        "house_support_changed",
+        "information_revealed",
+    ] {
+        let e = result
+            .events
+            .iter()
+            .find(|ev| ev.event_type == et)
+            .unwrap_or_else(|| panic!("missing {et}"));
+        assert_eq!(e.caused_by, Some(action.event_id), "{et} caused_by");
+        assert_eq!(e.influence_links.len(), 1, "{et} link count");
+        let link = &e.influence_links[0];
+        assert_eq!(link.source_event, action.event_id, "{et} source_event");
+        assert_eq!(link.path_length, 1, "{et} path_length");
+        assert_eq!(
+            link.contribution_class,
+            ContributionClass::Direct,
+            "{et} class"
+        );
+        assert_eq!(
+            link.top_contributors,
+            vec![action.event_id],
+            "{et} contributors"
+        );
     }
+
+    // 정보 확인: caused_by=공개, source_event=행동, mediated, path_length 2, 기여자=[행동, 공개]
+    let revealed = result
+        .events
+        .iter()
+        .find(|e| e.event_type == "information_revealed")
+        .expect("revealed");
+    let resolved = result
+        .events
+        .iter()
+        .find(|e| e.event_type == "information_resolved")
+        .expect("resolved");
+    assert_eq!(resolved.caused_by, Some(revealed.event_id));
+    assert_eq!(resolved.influence_links.len(), 1);
+    let link = &resolved.influence_links[0];
+    assert_eq!(link.source_event, action.event_id);
+    assert_eq!(link.path_length, 2);
+    assert_eq!(link.contribution_class, ContributionClass::Mediated);
+    assert_eq!(
+        link.top_contributors,
+        vec![action.event_id, revealed.event_id]
+    );
 }
 
 #[test]

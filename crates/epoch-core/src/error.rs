@@ -14,6 +14,8 @@ pub enum CoreError {
     VisibilityRegression { from: String, to: String },
     EventIdCollision { event_id: u64 },
     CommandSequenceCollision { sequence: u64 },
+    EventIdOverflow,
+    CommandSequenceOverflow,
     InvalidActionCode { action_code: String },
     Serialization(String),
 }
@@ -42,6 +44,10 @@ impl fmt::Display for CoreError {
             }
             CoreError::CommandSequenceCollision { sequence } => {
                 write!(f, "command sequence collision: {sequence}")
+            }
+            CoreError::EventIdOverflow => write!(f, "event id counter overflow"),
+            CoreError::CommandSequenceOverflow => {
+                write!(f, "command sequence counter overflow")
             }
             CoreError::InvalidActionCode { action_code } => {
                 write!(f, "invalid action code: {action_code}")

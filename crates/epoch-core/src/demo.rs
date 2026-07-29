@@ -60,15 +60,6 @@ pub fn run_demo(seed: u64) -> Result<DemoResult, CoreError> {
     let submitted_commands: Vec<CommandEnvelope> = scheduler.pending().to_vec();
 
     while let Some(envelope) = scheduler.pop_next() {
-        if world
-            .events
-            .iter()
-            .any(|e| e.event_id == world.next_event_id)
-        {
-            return Err(CoreError::EventIdCollision {
-                event_id: world.next_event_id,
-            });
-        }
         execute_command(&mut world, &mut scheduler, &envelope)?;
     }
 

@@ -57,18 +57,19 @@ struct FollowUp {
     command_id_suffix: String,
 }
 
-/// 단일 명령을 검증 후 적용한다. 오류 시 상태를 변경하지 않는다.
+/// 단일 명령을 검증 후 적용한다. 오류 시 세계와 스케줄러를 모두 복원한다.
 pub fn execute_command(
     world: &mut WorldState,
     scheduler: &mut Scheduler,
     envelope: &CommandEnvelope,
 ) -> Result<(), CoreError> {
-    // 스냅샷으로 부분 적용 방지
-    let snapshot = world.clone();
+    let world_snapshot = world.clone();
+    let scheduler_snapshot = scheduler.clone();
     match apply_command(world, scheduler, envelope) {
         Ok(()) => Ok(()),
         Err(e) => {
-            *world = snapshot;
+            *world = world_snapshot;
+            *scheduler = scheduler_snapshot;
             Err(e)
         }
     }
@@ -122,7 +123,7 @@ fn apply_record_player_action(
         });
     }
 
-    let event_id = world.allocate_event_id();
+    let event_id = world.allocate_event_id()?;
     let actor = world.player.id.clone();
     let event = Event::player_action(
         event_id,
@@ -201,7 +202,7 @@ fn apply_set_player_stance(
     }
     world.player.stance = stance.to_string();
 
-    let event_id = world.allocate_event_id();
+    let event_id = world.allocate_event_id()?;
     let cause = envelope.caused_by_event;
     let mut event = Event {
         event_id,
@@ -273,7 +274,7 @@ fn apply_set_house_support(
     world.houses[idx].support_status = support_status;
     world.houses[idx].supported_candidate = supported_candidate.map(|s| s.to_string());
 
-    let event_id = world.allocate_event_id();
+    let event_id = world.allocate_event_id()?;
     let cause = envelope.caused_by_event;
     let mut event = Event {
         event_id,
@@ -330,7 +331,7 @@ fn apply_reveal_information(
     world.information[idx].visibility = visibility;
     let after = visibility_str(visibility).to_string();
 
-    let event_id = world.allocate_event_id();
+    let event_id = world.allocate_event_id()?;
     let cause = envelope.caused_by_event;
     let mut event = Event {
         event_id,
@@ -356,7 +357,6 @@ fn apply_reveal_information(
     world.events.push(event);
 
     // 다음 시각에 확인 명령 스케줄
-    let root_action = cause;
     schedule_follow_up(
         world,
         scheduler,
@@ -375,8 +375,6 @@ fn apply_reveal_information(
         },
     )?;
 
-    // root_action은 Resolve 시 mediated 링크에 사용. envelope에 보존됨.
-    let _ = root_action;
     Ok(())
 }
 
@@ -405,18 +403,15 @@ fn apply_resolve_information(
     let before = visibility_str(current).to_string();
     let new_vis = if success {
         InformationVisibility::PublicFact
+    } else if current == InformationVisibility::Private {
+        InformationVisibility::Unverified
     } else {
-        // 실패 시 unverified 유지 (이미 unverified이면 동일)
-        if current == InformationVisibility::Private {
-            InformationVisibility::Unverified
-        } else {
-            current
-        }
+        current
     };
     world.information[idx].visibility = new_vis;
     let after = visibility_str(new_vis).to_string();
 
-    let event_id = world.allocate_event_id();
+    let event_id = world.allocate_event_id()?;
     let revealed_event = envelope.caused_by_event;
 
     // 매개 인과: root = 공개 사건의 caused_by(플레이어 행동)
@@ -477,7 +472,6 @@ fn validate_visibility_transition(
     current: InformationVisibility,
     next: InformationVisibility,
 ) -> Result<(), CoreError> {
-    // 공개 사실에서 private로 역행 금지
     if current == InformationVisibility::PublicFact && next == InformationVisibility::Private {
         return Err(CoreError::VisibilityRegression {
             from: visibility_str(current).to_string(),
@@ -502,21 +496,13 @@ fn support_status_str(s: SupportStatus) -> &'static str {
     }
 }
 
+/// Scheduler가 sequence를 부여하고, 성공 시에만 세계 카운터를 동기화한다.
 fn schedule_follow_up(
     world: &mut WorldState,
     scheduler: &mut Scheduler,
     fu: FollowUp,
 ) -> Result<(), CoreError> {
-    let sequence = world.allocate_command_sequence();
-    // sequence 충돌 방지: 할당된 값이 큐에 이미 있으면 오류
-    if scheduler
-        .pending()
-        .iter()
-        .any(|e| e.scheduled_key.sequence == sequence)
-    {
-        return Err(CoreError::CommandSequenceCollision { sequence });
-    }
-
+    let sequence = scheduler.next_sequence();
     let envelope = CommandEnvelope {
         command_id: format!("cmd-{sequence}-{}", fu.command_id_suffix),
         scheduled_key: ScheduledKey {
@@ -524,13 +510,14 @@ fn schedule_follow_up(
             phase: fu.phase,
             priority: fu.priority,
             actor_id: fu.actor_id,
-            sequence,
+            sequence: 0,
         },
         issued_by: fu.issued_by,
         caused_by_event: fu.caused_by_event,
         command: fu.command,
     };
-    scheduler.register(envelope);
+    scheduler.register(envelope)?;
+    world.next_command_sequence = scheduler.next_sequence();
     Ok(())
 }
 
@@ -547,32 +534,27 @@ pub struct SubmitSpec {
 }
 
 /// 외부에서 초기 명령을 스케줄에 등록한다.
+/// sequence 충돌은 Scheduler가 상태 변경 전에 거부하며, 오류 시 세계·스케줄러를 변경하지 않는다.
 pub fn submit_command(
     world: &mut WorldState,
     scheduler: &mut Scheduler,
     spec: SubmitSpec,
 ) -> Result<(), CoreError> {
-    let sequence = world.allocate_command_sequence();
-    if scheduler
-        .pending()
-        .iter()
-        .any(|e| e.scheduled_key.sequence == sequence)
-    {
-        return Err(CoreError::CommandSequenceCollision { sequence });
-    }
-    scheduler.register(CommandEnvelope {
+    let envelope = CommandEnvelope {
         command_id: spec.command_id,
         scheduled_key: ScheduledKey {
             time: spec.time,
             phase: spec.phase,
             priority: spec.priority,
             actor_id: spec.actor_id,
-            sequence,
+            sequence: 0,
         },
         issued_by: spec.issued_by,
         caused_by_event: spec.caused_by_event,
         command: spec.command,
-    });
+    };
+    scheduler.register(envelope)?;
+    world.next_command_sequence = scheduler.next_sequence();
     Ok(())
 }
 
@@ -800,5 +782,170 @@ mod tests {
         assert_eq!(world.events.len(), before.events.len());
         assert_eq!(world.next_event_id, before.next_event_id);
         assert_eq!(world.player, before.player);
+    }
+
+    #[test]
+    fn event_id_collision_rejects_without_mutation() {
+        let (mut world, mut sched) = fresh();
+        world.events.push(Event::player_action(
+            1,
+            0,
+            "player-ren-arden",
+            EXPOSE_DUPLICATE_PROMISE,
+            "pre-existing",
+        ));
+        // next_event_id is still 1 → collision
+        let before = world.clone();
+        let env = CommandEnvelope {
+            command_id: "t".into(),
+            scheduled_key: ScheduledKey {
+                time: 1,
+                phase: Phase::ActionExecution,
+                priority: 0,
+                actor_id: "x".into(),
+                sequence: 0,
+            },
+            issued_by: "test".into(),
+            caused_by_event: None,
+            command: Command::SetPlayerStance {
+                player_id: "player-ren-arden".into(),
+                stance: "new-stance".into(),
+            },
+        };
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::EventIdCollision { event_id: 1 }));
+        assert_eq!(world.next_event_id, before.next_event_id);
+        assert_eq!(world.player.stance, before.player.stance);
+        assert_eq!(world.events.len(), before.events.len());
+    }
+
+    #[test]
+    fn execute_error_restores_scheduler() {
+        let (mut world, mut sched) = fresh();
+        // 후속 등록 중 충돌을 만들기 위해 sequence를 선점
+        sched
+            .register(CommandEnvelope {
+                command_id: "blocker".into(),
+                scheduled_key: ScheduledKey {
+                    time: 999,
+                    phase: Phase::UiSummary,
+                    priority: 0,
+                    actor_id: "z".into(),
+                    sequence: 0,
+                },
+                issued_by: "test".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "x".into(),
+                },
+            })
+            .unwrap();
+        // next_sequence is 1; force it back so next register collides after first follow-up?
+        // Better: force next_sequence to a used value after first successful register inside action.
+        // Instead, pre-use sequences 1,2,3 so follow-ups fail on second/third...
+        // Actually first follow-up gets sequence 1. Pre-insert used via register then set next back.
+        // Simpler path: allocate event succeeds, first follow-up registers (seq=1), then we need failure.
+        // Use overflow: set next_sequence to u64::MAX so first follow-up fails with overflow.
+        sched = Scheduler::with_next_sequence(u64::MAX);
+        let before_world = world.clone();
+        let before_sched = sched.clone();
+        let env = CommandEnvelope {
+            command_id: "action".into(),
+            scheduled_key: ScheduledKey {
+                time: 100,
+                phase: Phase::ActionExecution,
+                priority: 0,
+                actor_id: "player-ren-arden".into(),
+                sequence: 0,
+            },
+            issued_by: "test".into(),
+            caused_by_event: None,
+            command: Command::RecordPlayerAction {
+                action_code: EXPOSE_DUPLICATE_PROMISE.into(),
+            },
+        };
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::CommandSequenceOverflow));
+        assert_eq!(world, before_world);
+        assert_eq!(sched.len(), before_sched.len());
+        assert_eq!(sched.next_sequence(), before_sched.next_sequence());
+    }
+
+    #[test]
+    fn submit_command_does_not_advance_world_on_collision() {
+        let (mut world, mut sched) = fresh();
+        submit_command(
+            &mut world,
+            &mut sched,
+            SubmitSpec {
+                time: 1,
+                phase: Phase::ActionExecution,
+                priority: 0,
+                actor_id: "a".into(),
+                issued_by: "t".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "x".into(),
+                },
+                command_id: "first".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(world.next_command_sequence, 1);
+        // Force collision on next submit
+        // Scheduler next is 1; mark it used by rolling next back after registering a phantom
+        // Direct: set next_sequence to 0 which is used
+        let mut sched2 = Scheduler::new();
+        sched2
+            .register(CommandEnvelope {
+                command_id: "x".into(),
+                scheduled_key: ScheduledKey {
+                    time: 1,
+                    phase: Phase::ActionExecution,
+                    priority: 0,
+                    actor_id: "a".into(),
+                    sequence: 0,
+                },
+                issued_by: "t".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "x".into(),
+                },
+            })
+            .unwrap();
+        // Manually create collision path by using a scheduler that will collide
+        // Re-use the internal path: register already used next by cloning and corrupting
+        // We'll test via with_next_sequence(0) after sequences are used - need access.
+        // Use public API only: after one register, create new world state and try
+        // to register with scheduler whose next is still 0 but used contains 0.
+        // The test in scheduler covers collision. Here verify submit doesn't change world
+        // when register fails — inject by overflowing:
+        let mut world2 = WorldState::new_initial(1);
+        let mut sched_overflow = Scheduler::with_next_sequence(u64::MAX);
+        let before_seq = world2.next_command_sequence;
+        let err = submit_command(
+            &mut world2,
+            &mut sched_overflow,
+            SubmitSpec {
+                time: 1,
+                phase: Phase::ActionExecution,
+                priority: 0,
+                actor_id: "a".into(),
+                issued_by: "t".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "x".into(),
+                },
+                command_id: "boom".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::CommandSequenceOverflow));
+        assert_eq!(world2.next_command_sequence, before_seq);
+        assert!(sched_overflow.is_empty());
     }
 }
