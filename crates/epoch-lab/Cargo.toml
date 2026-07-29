@@ -1,0 +1,13 @@
+[package]
+name = "epoch-lab"
+version = "0.1.0"
+edition.workspace = true
+description = "EPOCH lab CLI for demo and determinism checks"
+
+[[bin]]
+name = "epoch-lab"
+path = "src/main.rs"
+
+[dependencies]
+epoch-core = { path = "../epoch-core" }
+serde_json = { workspace = true }

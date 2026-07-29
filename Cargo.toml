@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/epoch-core",
+    "crates/epoch-lab",
+]
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
