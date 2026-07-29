@@ -354,6 +354,160 @@ try {
     })`);
   }
 
+  // review·decision·resolved 각 상태에서 실제 레이아웃 값으로 넘침·잘림·겹침을 감사한다.
+  // 범용 레이아웃 엔진이 아니라 M-1.2 화면의 지정 요소만 검사한다.
+  async function auditLayout(w, h, phase) {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: w,
+      height: h,
+      deviceScaleFactor: 1,
+      mobile: w < 500,
+    });
+    await sleep(350);
+    return cdp.eval(`(() => {
+      const vw = window.innerWidth;
+      const label = (el) => el.id
+        ? '#' + el.id
+        : (el.className ? '.' + String(el.className).trim().split(/\\s+/).join('.') : el.tagName);
+      // 숨겨진 요소는 겹침·넘침 검사 대상에서 제외한다
+      const visible = (el) => {
+        if (!el || el.hidden || el.closest('[hidden]')) return false;
+        const s = getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) === 0) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const rectOf = (el) => el.getBoundingClientRect();
+      const overlaps = (a, b) => {
+        const ra = rectOf(a);
+        const rb = rectOf(b);
+        const ox = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+        const oy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
+        return ox > 2 && oy > 2;
+      };
+      const issues = [];
+
+      // 1) 뷰포트 이탈과 의도치 않은 잘림
+      const TARGETS = [
+        '#confirm-panel', '#outcome-panel', '#btn-confirm', '#btn-cancel', '#btn-retry',
+        '.proposal-card', '.action-card', '.confirm-actions', '.outcome-actions',
+      ];
+      const targets = [];
+      for (const sel of TARGETS) {
+        const all = [...document.querySelectorAll(sel)];
+        const vis = all.filter(visible);
+        targets.push({ selector: sel, total: all.length, visible: vis.length });
+        for (const el of vis) {
+          const r = rectOf(el);
+          const s = getComputedStyle(el);
+          const hidesX = s.overflowX === 'hidden' || s.overflow === 'hidden';
+          const hidesY = s.overflowY === 'hidden' || s.overflow === 'hidden';
+          if (r.right > vw + 1) issues.push('offscreen-right:' + sel);
+          if (r.left < -1) issues.push('offscreen-left:' + sel);
+          if (hidesX && el.scrollWidth > el.clientWidth + 2) issues.push('clipped-x:' + sel);
+          if (hidesY && el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 2) {
+            issues.push('clipped-y:' + sel);
+          }
+        }
+      }
+
+      // 2) 그룹별 겹침 (부모-자식 포함 관계는 겹침으로 보지 않는다)
+      const groups = {};
+      const checkGroup = (name, els) => {
+        const vis = els.filter(visible);
+        let pairs = 0;
+        for (let i = 0; i < vis.length; i++) {
+          for (let j = i + 1; j < vis.length; j++) {
+            if (vis[i].contains(vis[j]) || vis[j].contains(vis[i])) continue;
+            pairs++;
+            if (overlaps(vis[i], vis[j])) {
+              issues.push('overlap:' + name + ':' + label(vis[i]) + '|' + label(vis[j]));
+            }
+          }
+        }
+        groups[name] = { visible: vis.length, pairs };
+        return vis;
+      };
+
+      checkGroup('action-cards', [...document.querySelectorAll('.action-card')]);
+      checkGroup('proposal-cards', [...document.querySelectorAll('.proposal-card')]);
+      checkGroup('confirm-actions', [...document.querySelectorAll('.confirm-actions .btn')]);
+      checkGroup('outcome-actions', [...document.querySelectorAll('.outcome-actions .btn')]);
+
+      // 3) 확인 버튼과 돌아가기 버튼
+      const btnConfirm = document.querySelector('#btn-confirm');
+      const btnCancel = document.querySelector('#btn-cancel');
+      const confirmPairVisible = visible(btnConfirm) && visible(btnCancel);
+      if (confirmPairVisible && overlaps(btnConfirm, btnCancel)) {
+        issues.push('overlap:confirm-cancel');
+      }
+      groups['confirm-cancel'] = { visible: confirmPairVisible ? 2 : 0, pairs: confirmPairVisible ? 1 : 0 };
+
+      // 4) 결과 패널의 재시도 버튼과 결과 내용 구역
+      const btnRetry = document.querySelector('#btn-retry');
+      let retryPairs = 0;
+      if (visible(btnRetry)) {
+        const blocks = [...document.querySelectorAll('#outcome-panel .outcome-block')];
+        for (const block of blocks) {
+          if (!visible(block) || block.contains(btnRetry) || btnRetry.contains(block)) continue;
+          retryPairs++;
+          if (overlaps(btnRetry, block)) issues.push('overlap:retry|' + label(block));
+        }
+      }
+      groups['retry-vs-outcome'] = { visible: visible(btnRetry) ? 1 : 0, pairs: retryPairs };
+
+      // 5) 같은 컨테이너 안의 형제 버튼
+      const parents = new Set();
+      for (const btn of document.querySelectorAll('button')) {
+        if (btn.parentElement) parents.add(btn.parentElement);
+      }
+      let siblingPairs = 0;
+      let siblingButtons = 0;
+      for (const parent of parents) {
+        const btns = [...parent.children].filter((el) => el.tagName === 'BUTTON').filter(visible);
+        siblingButtons += btns.length;
+        for (let i = 0; i < btns.length; i++) {
+          for (let j = i + 1; j < btns.length; j++) {
+            siblingPairs++;
+            if (overlaps(btns[i], btns[j])) {
+              issues.push('overlap:sibling-buttons:' + label(btns[i]) + '|' + label(btns[j]));
+            }
+          }
+        }
+      }
+      groups['sibling-buttons'] = { visible: siblingButtons, pairs: siblingPairs };
+
+      return {
+        phase: ${JSON.stringify(phase)},
+        viewport: vw + 'x' + window.innerHeight,
+        hasHScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        confirmVisible: visible(document.querySelector('#confirm-panel')),
+        outcomeVisible: visible(document.querySelector('#outcome-panel')),
+        targets,
+        groups,
+        issues,
+      };
+    })()`);
+  }
+
+  // 결과·확인 단계에서 초기 선택 화면(review)으로 되돌린다
+  async function resetToReview() {
+    await cdp.eval(`(() => {
+      const outcomeOpen = !document.querySelector('#outcome-section')?.hidden;
+      if (outcomeOpen) {
+        document.querySelector('#btn-retry')?.click();
+        return 'retry';
+      }
+      const confirmOpen = !document.querySelector('#confirm-panel')?.hidden;
+      if (confirmOpen) {
+        document.querySelector('#btn-cancel')?.click();
+        return 'cancel';
+      }
+      return 'already-review';
+    })()`);
+    await sleep(300);
+  }
+
   const desktop = await measure(1280, 720);
 
   // --- 버튼 의미 구조 검증 ---
@@ -631,6 +785,26 @@ try {
   await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
   await sleep(200);
 
+  // --- 레이아웃 감사: review·decision·resolved × 1280x720·390x664 ---
+  const layoutAudits = [];
+  for (const [vpW, vpH, vpTag] of [
+    [1280, 720, 'desktop'],
+    [390, 664, 'mobile'],
+  ]) {
+    await resetToReview();
+    layoutAudits.push(await auditLayout(vpW, vpH, `${vpTag} review`));
+
+    await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
+    await sleep(250);
+    layoutAudits.push(await auditLayout(vpW, vpH, `${vpTag} decision`));
+
+    await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+    await sleep(350);
+    layoutAudits.push(await auditLayout(vpW, vpH, `${vpTag} resolved`));
+
+    await resetToReview();
+  }
+
   const consoleErrors = cdp.console.filter(
     (c) => c.type === 'error' || c.type === 'exception' || c.exceptionDetails,
   );
@@ -666,6 +840,7 @@ try {
     mobile,
     mobileDecision,
     mobileResolved,
+    layoutAudits,
     consoleLogCount: cdp.console.length,
     consoleErrors,
   };
@@ -765,6 +940,58 @@ try {
     if (snap?.hasHScroll) failures.push(`${name} horizontal scroll`);
     if (snap?.layoutIssues?.length) {
       failures.push(`${name} layout: ${snap.layoutIssues.join(';')}`);
+    }
+  }
+
+  // review·decision·resolved × 데스크톱·모바일 겹침·넘침·클리핑 감사
+  const AUDIT_EXPECT = [
+    'desktop review', 'desktop decision', 'desktop resolved',
+    'mobile review', 'mobile decision', 'mobile resolved',
+  ];
+  if (layoutAudits.length !== AUDIT_EXPECT.length) {
+    failures.push(`layout audit count ${layoutAudits.length}, expected ${AUDIT_EXPECT.length}`);
+  }
+  for (const phase of AUDIT_EXPECT) {
+    const audit = layoutAudits.find((a) => a.phase === phase);
+    if (!audit) {
+      failures.push(`layout audit missing: ${phase}`);
+      continue;
+    }
+    if (audit.hasHScroll) failures.push(`${phase} horizontal scroll`);
+    if (audit.issues.length) failures.push(`${phase} layout: ${audit.issues.join(';')}`);
+
+    const visibleOf = (selector) =>
+      audit.targets.find((t) => t.selector === selector)?.visible ?? 0;
+
+    // 감사가 빈 화면을 통과시키지 않도록 각 상태의 필수 요소 표시를 확인한다
+    if (visibleOf('.proposal-card') !== 3) {
+      failures.push(`${phase} proposal cards visible ${visibleOf('.proposal-card')}, expected 3`);
+    }
+    if (visibleOf('.action-card') !== 5) {
+      failures.push(`${phase} action cards visible ${visibleOf('.action-card')}, expected 5`);
+    }
+    if (phase.endsWith('review')) {
+      if (audit.confirmVisible) failures.push(`${phase} confirm panel should be hidden`);
+      if (audit.outcomeVisible) failures.push(`${phase} outcome panel should be hidden`);
+    }
+    if (phase.endsWith('decision')) {
+      if (!audit.confirmVisible) failures.push(`${phase} confirm panel not visible`);
+      if (audit.outcomeVisible) failures.push(`${phase} outcome panel should be hidden`);
+      if (audit.groups['confirm-cancel']?.visible !== 2) {
+        failures.push(`${phase} confirm/cancel buttons not both visible`);
+      }
+      if (visibleOf('#btn-confirm') !== 1 || visibleOf('#btn-cancel') !== 1) {
+        failures.push(`${phase} confirm actions missing`);
+      }
+    }
+    if (phase.endsWith('resolved')) {
+      if (!audit.outcomeVisible) failures.push(`${phase} outcome panel not visible`);
+      if (visibleOf('#btn-retry') !== 1) failures.push(`${phase} retry button not visible`);
+      if (!(audit.groups['retry-vs-outcome']?.pairs >= 5)) {
+        failures.push(
+          `${phase} retry/outcome block pairs ${audit.groups['retry-vs-outcome']?.pairs}, expected >= 5`,
+        );
+      }
     }
   }
   for (let i = 0; i < candidateExpect.length; i++) {
