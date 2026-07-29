@@ -229,7 +229,7 @@ try {
   await cdp.send('Page.enable');
   await cdp.send('Page.navigate', { url: site.url });
 
-  // --- 페이지 준비 대기: 후보 3, 가문 5, 플레이어 토글 1 ---
+  // --- 페이지 준비 대기: 후보 3, 가문 5, 플레이어 토글 1, 제안 3, 행동 5 ---
   const readyDeadline = Date.now() + 20000;
   let readyState = null;
   while (Date.now() < readyDeadline) {
@@ -237,13 +237,31 @@ try {
       candidates: document.querySelectorAll('.candidate-card').length,
       houses: document.querySelectorAll('.house-card').length,
       playerToggle: document.querySelectorAll('#player-toggle').length,
+      proposals: document.querySelectorAll('.proposal-toggle').length,
+      actions: document.querySelectorAll('.action-card').length,
       documentState: document.readyState,
       bodyLength: (document.body?.innerText || '').length,
     })`);
-    if (readyState.candidates === 3 && readyState.houses === 5 && readyState.playerToggle === 1) break;
+    if (
+      readyState.candidates === 3 &&
+      readyState.houses === 5 &&
+      readyState.playerToggle === 1 &&
+      readyState.proposals === 3 &&
+      readyState.actions === 5
+    ) {
+      break;
+    }
     await sleep(200);
   }
-  if (!(readyState?.candidates === 3 && readyState?.houses === 5 && readyState?.playerToggle === 1)) {
+  if (
+    !(
+      readyState?.candidates === 3 &&
+      readyState?.houses === 5 &&
+      readyState?.playerToggle === 1 &&
+      readyState?.proposals === 3 &&
+      readyState?.actions === 5
+    )
+  ) {
     const consoleDump = cdp.console
       .filter((c) => c.type === 'error' || c.type === 'exception' || c.exceptionDetails)
       .map((c) => JSON.stringify(c))
@@ -255,6 +273,8 @@ try {
         `  candidate cards: ${readyState?.candidates ?? 'n/a'} (expected 3)`,
         `  house cards: ${readyState?.houses ?? 'n/a'} (expected 5)`,
         `  player toggle: ${readyState?.playerToggle ?? 'n/a'} (expected 1)`,
+        `  proposals: ${readyState?.proposals ?? 'n/a'} (expected 3)`,
+        `  actions: ${readyState?.actions ?? 'n/a'} (expected 5)`,
         `  document.readyState: ${readyState?.documentState ?? 'n/a'}`,
         `  page load failed: ${(readyState?.bodyLength ?? 0) === 0 ? 'yes' : 'no'}`,
         `  console errors:${consoleDump ? '\n' + consoleDump : ' none'}`,
@@ -295,15 +315,15 @@ try {
           const r = el.getBoundingClientRect();
           return { w: r.width, h: r.height, tag: el.className };
         }),
-      minTouchW: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
-        .map(el => el.getBoundingClientRect().width)),
-      minTouchH: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle')]
-        .map(el => el.getBoundingClientRect().height)),
+      minTouchW: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle,.proposal-toggle,.action-card,.btn')]
+        .map(el => el.getBoundingClientRect().width).filter(w => w > 0)),
+      minTouchH: Math.min(...[...document.querySelectorAll('.candidate-card,.house-card,#player-toggle,.proposal-toggle,.action-card,.btn')]
+        .map(el => el.getBoundingClientRect().height).filter(h => h > 0)),
       layoutIssues: (() => {
         const issues = [];
         const vw = window.innerWidth;
         const core = [...document.querySelectorAll(
-          '.candidate-card,.house-card,#player-toggle,#candidate-detail,#house-detail,.crisis-facts,h1,h2'
+          '.candidate-card,.house-card,#player-toggle,#candidate-detail,#house-detail,.crisis-facts,h1,h2,.proposal-card,.action-card,#confirm-panel,#outcome-panel,.btn'
         )];
         for (const el of core) {
           const r = el.getBoundingClientRect();
@@ -338,7 +358,7 @@ try {
 
   // --- 버튼 의미 구조 검증 ---
   const semantics = await cdp.eval(`(() => {
-    const FORBIDDEN = ['DIV','P','H1','H2','H3','H4','H5','H6','SECTION','ARTICLE','BUTTON','A','INPUT','SELECT','TEXTAREA'];
+    const FORBIDDEN = ['DIV','P','H1','H2','H3','H4','H5','H6','SECTION','ARTICLE','BUTTON','A','INPUT','SELECT','TEXTAREA','UL','OL','LI','DL','DT','DD'];
     const inspect = (selector, kind) => [...document.querySelectorAll(selector)].map((el, index) => ({
       kind,
       index,
@@ -349,6 +369,8 @@ try {
       ...inspect('.candidate-card', 'candidate'),
       ...inspect('.house-card', 'house'),
       ...inspect('#player-toggle', 'player'),
+      ...inspect('.proposal-toggle', 'proposal'),
+      ...inspect('.action-card', 'action'),
     ];
   })()`);
 
@@ -449,6 +471,127 @@ try {
     activeIsHouse: document.activeElement?.classList?.contains('house-card') || false,
   })`);
 
+  // --- M-1.2: 제안·행동·확인·결과 핵심 흐름 ---
+  const proposalExpand = await cdp.eval(`(() => {
+    const btn = document.querySelectorAll('.proposal-toggle')[0];
+    btn?.click();
+    return {
+      count: document.querySelectorAll('.proposal-toggle').length,
+      expanded: document.querySelectorAll('.proposal-card.is-expanded').length,
+      bodyVisible: !!document.querySelector('.proposal-card.is-expanded .proposal-body:not([hidden])'),
+      proposer: document.querySelector('.proposal-card.is-expanded .proposal-proposer')?.textContent,
+    };
+  })()`);
+  await sleep(150);
+
+  // 행동 A 선택 → 확인 패널
+  await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
+  await sleep(200);
+  const confirmA = await cdp.eval(`({
+    confirmVisible: !document.querySelector('#confirm-panel')?.hidden,
+    chosenText: document.querySelector('#confirm-panel .confirm-chosen')?.textContent || '',
+    hasConfirm: !!document.querySelector('#btn-confirm'),
+    hasCancel: !!document.querySelector('#btn-cancel'),
+  })`);
+
+  // 돌아가기
+  await cdp.eval(`document.querySelector('#btn-cancel')?.click()`);
+  await sleep(200);
+  const afterCancel = await cdp.eval(`({
+    confirmHidden: !!document.querySelector('#confirm-panel')?.hidden,
+    outcomeHidden: !!document.querySelector('#outcome-section')?.hidden,
+    selectedActions: document.querySelectorAll('.action-card.is-selected').length,
+  })`);
+
+  // 행동 A 확정
+  await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const resultA = await cdp.eval(`({
+    outcomeVisible: !document.querySelector('#outcome-section')?.hidden,
+    heading: document.querySelector('#outcome-heading')?.textContent,
+    body: document.querySelector('#outcome-panel')?.innerText || '',
+    sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    focusIsOutcome: document.activeElement?.id === 'outcome-panel' || document.activeElement?.closest?.('#outcome-panel') != null,
+    activeId: document.activeElement?.id || '',
+  })`);
+
+  // 다른 선택 시도 후 행동 B
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(250);
+  const afterRetry = await cdp.eval(`({
+    outcomeHidden: !!document.querySelector('#outcome-section')?.hidden,
+    sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    actionEnabled: !document.querySelector('[data-action-id="action-a"]')?.disabled,
+    focusAction: document.activeElement?.classList?.contains('action-card') || false,
+  })`);
+
+  await cdp.eval(`document.querySelector('[data-action-id="action-b"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const resultB = await cdp.eval(`({
+    body: document.querySelector('#outcome-panel')?.innerText || '',
+    sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    halbStance: document.querySelector('[data-house-id="house-halbeck"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    hasAWaver: (document.querySelector('#outcome-panel')?.innerText || '').includes('동요') &&
+      (document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent || '').includes('동요'),
+  })`);
+
+  // 행동 C
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(200);
+  await cdp.eval(`document.querySelector('[data-action-id="action-c"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const resultC = await cdp.eval(`({
+    body: document.querySelector('#outcome-panel')?.innerText || '',
+    mireyaClaim: document.querySelectorAll('.candidate-card')[2]?.querySelector('.card-claim')?.textContent || '',
+    halbStance: document.querySelector('[data-house-id="house-halbeck"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+  })`);
+
+  // 행동 D
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(200);
+  await cdp.eval(`document.querySelector('[data-action-id="action-d"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const resultD = await cdp.eval(`({
+    body: document.querySelector('#outcome-panel')?.innerText || '',
+    sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    darianSupport: document.querySelectorAll('.candidate-card')[1]?.querySelector('.card-support')?.textContent || '',
+  })`);
+
+  // 행동 E
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(200);
+  await cdp.eval(`document.querySelector('[data-action-id="action-e"]').click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const resultE = await cdp.eval(`({
+    body: document.querySelector('#outcome-panel')?.innerText || '',
+    stances: {
+      arden: document.querySelector('[data-house-id="house-arden"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+      barren: document.querySelector('[data-house-id="house-barren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+      soren: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+      merova: document.querySelector('[data-house-id="house-merova"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+      halb: document.querySelector('[data-house-id="house-halbeck"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+    },
+  })`);
+
+  // 최종 재시작
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(250);
+  const finalReset = await cdp.eval(`({
+    outcomeHidden: !!document.querySelector('#outcome-section')?.hidden,
+    actions: document.querySelectorAll('.action-card:not(:disabled)').length,
+    sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
+  })`);
+
   const mobile = await measure(390, 664);
 
   const consoleErrors = cdp.console.filter(
@@ -467,6 +610,16 @@ try {
     afterCandidateKey2,
     afterHouseKey,
     afterHouseKey2,
+    proposalExpand,
+    confirmA,
+    afterCancel,
+    resultA,
+    afterRetry,
+    resultB,
+    resultC,
+    resultD,
+    resultE,
+    finalReset,
     mobile,
     consoleLogCount: cdp.console.length,
     consoleErrors,
@@ -487,12 +640,54 @@ try {
   if (semantics.filter((s) => s.kind === 'candidate').length !== 3) failures.push('semantics candidate count');
   if (semantics.filter((s) => s.kind === 'house').length !== 5) failures.push('semantics house count');
   if (semantics.filter((s) => s.kind === 'player').length !== 1) failures.push('semantics player count');
+  if (semantics.filter((s) => s.kind === 'proposal').length !== 3) failures.push('semantics proposal count');
+  if (semantics.filter((s) => s.kind === 'action').length !== 5) failures.push('semantics action count');
   for (const s of semantics) {
     if (s.tag !== 'BUTTON') failures.push(`${s.kind}[${s.index}] is ${s.tag}, expected BUTTON`);
     if (s.forbidden.length) {
       failures.push(`${s.kind}[${s.index}] contains forbidden element(s): ${s.forbidden.join(',')}`);
     }
   }
+
+  // M-1.2 제안·선택·결과
+  if (proposalExpand?.count !== 3) failures.push('proposal count');
+  if (!(proposalExpand?.expanded >= 1)) failures.push('proposal expand');
+  if (!proposalExpand?.bodyVisible) failures.push('proposal body');
+  if (!confirmA?.confirmVisible) failures.push('confirm panel after select A');
+  if (!confirmA?.chosenText?.includes('다리안을 공개 지지')) failures.push('confirm shows action A label');
+  if (!confirmA?.hasConfirm || !confirmA?.hasCancel) failures.push('confirm buttons');
+  if (!afterCancel?.confirmHidden) failures.push('cancel hides confirm');
+  if (!afterCancel?.outcomeHidden) failures.push('cancel keeps outcome hidden');
+  if (!resultA?.outcomeVisible) failures.push('outcome after A');
+  if (!resultA?.body?.includes('다리안 공개 지지')) failures.push('outcome A stance');
+  if (!resultA?.sorenStance?.includes('동요')) failures.push(`soren wavering after A got ${resultA?.sorenStance}`);
+  if (!resultA?.focusIsOutcome && resultA?.activeId !== 'outcome-panel') {
+    failures.push(`focus after outcome A (active=${resultA?.activeId})`);
+  }
+  if (!afterRetry?.outcomeHidden) failures.push('retry hides outcome');
+  if (!afterRetry?.sorenStance?.includes('다리안')) failures.push(`retry restores soren got ${afterRetry?.sorenStance}`);
+  if (!afterRetry?.actionEnabled) failures.push('actions re-enabled after retry');
+  if (!afterRetry?.focusAction) failures.push('focus action after retry');
+  if (!resultB?.halbStance?.includes('세리아')) failures.push(`halbeck lean seria after B got ${resultB?.halbStance}`);
+  if (resultB?.sorenStance?.includes('동요')) failures.push('A wavering leaked into B');
+  if (!resultB?.body?.includes('세리아 비밀 지지')) failures.push('outcome B stance');
+  if (!resultC?.mireyaClaim?.includes('기록 증거를 확보한 오래된 왕통')) {
+    failures.push(`mireya claim after C got ${resultC?.mireyaClaim}`);
+  }
+  if (!resultC?.halbStance?.includes('미레아')) failures.push(`halbeck lean mireya after C got ${resultC?.halbStance}`);
+  if (!resultD?.sorenStance?.includes('미결정')) failures.push(`soren undecided after D got ${resultD?.sorenStance}`);
+  if (!resultD?.darianSupport?.includes('1개 가문')) {
+    failures.push(`darian support count after D got ${resultD?.darianSupport}`);
+  }
+  if (!resultE?.stances?.arden?.includes('다리안')) failures.push('E arden stance');
+  if (!resultE?.stances?.barren?.includes('세리아')) failures.push('E barren stance');
+  if (!resultE?.stances?.soren?.includes('다리안')) failures.push('E soren stance');
+  if (!resultE?.stances?.merova?.includes('미레아')) failures.push('E merova stance');
+  if (!resultE?.stances?.halb?.includes('미결정')) failures.push('E halb stance');
+  if (!resultE?.body?.includes('중립')) failures.push('outcome E stance');
+  if (!finalReset?.outcomeHidden) failures.push('final reset hides outcome');
+  if (finalReset?.actions !== 5) failures.push('final reset actions enabled');
+  if (!finalReset?.sorenStance?.includes('다리안')) failures.push('final reset soren');
 
   for (let i = 0; i < candidateExpect.length; i++) {
     const exp = candidateExpect[i];
