@@ -242,23 +242,27 @@ fn apply_set_house_support(
             id: house_id.to_string(),
         })?;
 
-    if support_status == SupportStatus::Declared {
-        let cand = supported_candidate.ok_or_else(|| CoreError::MissingCandidateForSupport {
-            house_id: house_id.to_string(),
-        })?;
-        if !world.candidate_exists(cand) {
-            return Err(CoreError::UnknownCandidate {
-                id: cand.to_string(),
-            });
+    // 가문 지지 조합 불변식: Declared는 존재하는 후보 필수, Undecided는 후보 없음.
+    match support_status {
+        SupportStatus::Declared => {
+            let cand =
+                supported_candidate.ok_or_else(|| CoreError::MissingCandidateForSupport {
+                    house_id: house_id.to_string(),
+                })?;
+            if !world.candidate_exists(cand) {
+                return Err(CoreError::UnknownCandidate {
+                    id: cand.to_string(),
+                });
+            }
         }
-    }
-
-    if let Some(cand) = supported_candidate
-        && !world.candidate_exists(cand)
-    {
-        return Err(CoreError::UnknownCandidate {
-            id: cand.to_string(),
-        });
+        SupportStatus::Undecided => {
+            if let Some(cand) = supported_candidate {
+                return Err(CoreError::UnexpectedCandidateForUndecided {
+                    house_id: house_id.to_string(),
+                    candidate_id: cand.to_string(),
+                });
+            }
+        }
     }
 
     let house = &world.houses[idx];
@@ -327,6 +331,12 @@ fn apply_reveal_information(
     let current = world.information[idx].visibility;
     validate_visibility_transition(current, visibility)?;
 
+    // 다음 시각 후속 명령: 포화하지 않고 오버플로 시 명시 실패.
+    let next_time = world
+        .world_time
+        .checked_add(1)
+        .ok_or(CoreError::WorldTimeOverflow)?;
+
     let before = visibility_str(current).to_string();
     world.information[idx].visibility = visibility;
     let after = visibility_str(visibility).to_string();
@@ -364,7 +374,7 @@ fn apply_reveal_information(
             phase: Phase::InformationUpdate,
             priority: 0,
             actor_id: world.player.id.clone(),
-            time: world.world_time.saturating_add(1),
+            time: next_time,
             issued_by: envelope.issued_by.clone(),
             caused_by_event: Some(event_id),
             command: Command::ResolveInformation {
@@ -472,7 +482,8 @@ fn validate_visibility_transition(
     current: InformationVisibility,
     next: InformationVisibility,
 ) -> Result<(), CoreError> {
-    if current == InformationVisibility::PublicFact && next == InformationVisibility::Private {
+    // Private < Unverified < PublicFact 단방향. 동일 유지 허용, 역행 거부.
+    if next < current {
         return Err(CoreError::VisibilityRegression {
             from: visibility_str(current).to_string(),
             to: visibility_str(next).to_string(),
@@ -947,5 +958,341 @@ mod tests {
         assert!(matches!(err, CoreError::CommandSequenceOverflow));
         assert_eq!(world2.next_command_sequence, before_seq);
         assert!(sched_overflow.is_empty());
+    }
+
+    fn envelope_at(time: u64, command: Command) -> CommandEnvelope {
+        CommandEnvelope {
+            command_id: "t".into(),
+            scheduled_key: ScheduledKey {
+                time,
+                phase: Phase::ActionExecution,
+                priority: 0,
+                actor_id: "x".into(),
+                sequence: 0,
+            },
+            issued_by: "test".into(),
+            caused_by_event: None,
+            command,
+        }
+    }
+
+    fn house_support(
+        house_id: &str,
+        support_status: SupportStatus,
+        supported_candidate: Option<&str>,
+    ) -> Command {
+        Command::SetHouseSupport {
+            house_id: house_id.into(),
+            support_status,
+            supported_candidate: supported_candidate.map(|s| s.into()),
+        }
+    }
+
+    fn reveal(visibility: InformationVisibility) -> Command {
+        Command::RevealInformation {
+            info_id: "info-darian-duplicate-promise".into(),
+            visibility,
+        }
+    }
+
+    fn assert_world_sched_unchanged(
+        world: &WorldState,
+        sched: &Scheduler,
+        before_world: &WorldState,
+        before_sched: &Scheduler,
+    ) {
+        assert_eq!(world, before_world);
+        assert_eq!(sched.len(), before_sched.len());
+        assert_eq!(sched.next_sequence(), before_sched.next_sequence());
+        assert_eq!(sched.pending(), before_sched.pending());
+    }
+
+    // --- 결함 1: 가문 지지 조합 불변식 ---
+
+    #[test]
+    fn house_support_declared_with_existing_candidate_ok() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(
+            1,
+            house_support(
+                "house-halbeck",
+                SupportStatus::Declared,
+                Some("candidate-seria"),
+            ),
+        );
+        execute_command(&mut world, &mut sched, &env).unwrap();
+        let h = world
+            .houses
+            .iter()
+            .find(|h| h.id == "house-halbeck")
+            .unwrap();
+        assert_eq!(h.support_status, SupportStatus::Declared);
+        assert_eq!(h.supported_candidate.as_deref(), Some("candidate-seria"));
+    }
+
+    #[test]
+    fn house_support_declared_without_candidate_rejected() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(
+            1,
+            house_support("house-soren", SupportStatus::Declared, None),
+        );
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::MissingCandidateForSupport { .. }));
+    }
+
+    #[test]
+    fn house_support_declared_unknown_candidate_rejected() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(
+            1,
+            house_support(
+                "house-soren",
+                SupportStatus::Declared,
+                Some("candidate-ghost"),
+            ),
+        );
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::UnknownCandidate { .. }));
+    }
+
+    #[test]
+    fn house_support_undecided_without_candidate_ok() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(
+            1,
+            house_support("house-soren", SupportStatus::Undecided, None),
+        );
+        execute_command(&mut world, &mut sched, &env).unwrap();
+        let h = world.houses.iter().find(|h| h.id == "house-soren").unwrap();
+        assert_eq!(h.support_status, SupportStatus::Undecided);
+        assert_eq!(h.supported_candidate, None);
+    }
+
+    #[test]
+    fn house_support_undecided_with_candidate_rejected() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(
+            1,
+            house_support(
+                "house-halbeck",
+                SupportStatus::Undecided,
+                Some("candidate-seria"),
+            ),
+        );
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(
+            err,
+            CoreError::UnexpectedCandidateForUndecided {
+                house_id,
+                candidate_id,
+            } if house_id == "house-halbeck" && candidate_id == "candidate-seria"
+        ));
+    }
+
+    #[test]
+    fn house_support_invalid_combo_leaves_world_and_scheduler_unchanged() {
+        let (mut world, mut sched) = fresh();
+        // 스케줄러에 기존 항목이 있어도 오류 시 그대로여야 한다.
+        submit_command(
+            &mut world,
+            &mut sched,
+            SubmitSpec {
+                time: 50,
+                phase: Phase::UiSummary,
+                priority: 0,
+                actor_id: "marker".into(),
+                issued_by: "test".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "marker".into(),
+                },
+                command_id: "marker-cmd".into(),
+            },
+        )
+        .unwrap();
+        let before_world = world.clone();
+        let before_sched = sched.clone();
+        let env = envelope_at(
+            1,
+            house_support(
+                "house-soren",
+                SupportStatus::Undecided,
+                Some("candidate-darian"),
+            ),
+        );
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(
+            err,
+            CoreError::UnexpectedCandidateForUndecided { .. }
+        ));
+        assert_world_sched_unchanged(&world, &sched, &before_world, &before_sched);
+        let soren = world.houses.iter().find(|h| h.id == "house-soren").unwrap();
+        assert_eq!(soren.support_status, SupportStatus::Declared);
+        assert_eq!(
+            soren.supported_candidate.as_deref(),
+            Some("candidate-darian")
+        );
+        assert_eq!(world.world_time, before_world.world_time);
+        assert_eq!(world.next_event_id, before_world.next_event_id);
+        assert_eq!(
+            world.next_command_sequence,
+            before_world.next_command_sequence
+        );
+        assert_eq!(world.events.len(), before_world.events.len());
+    }
+
+    // --- 결함 2: 정보 공개 상태 전이 행렬 ---
+
+    #[test]
+    fn visibility_transition_matrix_all_nine_pairs() {
+        use InformationVisibility::*;
+        let cases: &[(InformationVisibility, InformationVisibility, bool)] = &[
+            (Private, Private, true),
+            (Private, Unverified, true),
+            (Private, PublicFact, true),
+            (Unverified, Private, false),
+            (Unverified, Unverified, true),
+            (Unverified, PublicFact, true),
+            (PublicFact, Private, false),
+            (PublicFact, Unverified, false),
+            (PublicFact, PublicFact, true),
+        ];
+        for &(current, next, allowed) in cases {
+            let (mut world, mut sched) = fresh();
+            world.information[0].visibility = current;
+            // 허용 경로에서 후속 등록이 되도록 시각을 안전하게 둔다.
+            let env = envelope_at(10, reveal(next));
+            let before_world = world.clone();
+            let before_sched = sched.clone();
+            let result = execute_command(&mut world, &mut sched, &env);
+            if allowed {
+                result
+                    .unwrap_or_else(|e| panic!("expected allow {current:?}->{next:?}, got {e:?}"));
+                assert_eq!(world.information[0].visibility, next);
+            } else {
+                let err = result.expect_err("expected regression");
+                assert!(
+                    matches!(err, CoreError::VisibilityRegression { .. }),
+                    "expected VisibilityRegression for {current:?}->{next:?}, got {err:?}"
+                );
+                assert_world_sched_unchanged(&world, &sched, &before_world, &before_sched);
+                assert_eq!(world.information[0].visibility, current);
+                assert_eq!(world.rng, before_world.rng);
+                assert_eq!(world.events.len(), before_world.events.len());
+                assert_eq!(world.next_event_id, before_world.next_event_id);
+            }
+        }
+    }
+
+    #[test]
+    fn visibility_regression_unverified_to_private_no_side_effects() {
+        let (mut world, mut sched) = fresh();
+        world.information[0].visibility = InformationVisibility::Unverified;
+        let before_world = world.clone();
+        let before_sched = sched.clone();
+        let err = execute_command(
+            &mut world,
+            &mut sched,
+            &envelope_at(5, reveal(InformationVisibility::Private)),
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::VisibilityRegression { .. }));
+        assert_world_sched_unchanged(&world, &sched, &before_world, &before_sched);
+    }
+
+    #[test]
+    fn visibility_regression_public_fact_to_unverified_no_side_effects() {
+        let (mut world, mut sched) = fresh();
+        world.information[0].visibility = InformationVisibility::PublicFact;
+        let before_world = world.clone();
+        let before_sched = sched.clone();
+        let err = execute_command(
+            &mut world,
+            &mut sched,
+            &envelope_at(5, reveal(InformationVisibility::Unverified)),
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::VisibilityRegression { .. }));
+        assert_world_sched_unchanged(&world, &sched, &before_world, &before_sched);
+    }
+
+    // --- 결함 3: 세계 시간 오버플로 ---
+
+    #[test]
+    fn reveal_at_max_minus_one_schedules_resolve_at_max() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(u64::MAX - 1, reveal(InformationVisibility::Unverified));
+        execute_command(&mut world, &mut sched, &env).unwrap();
+        assert_eq!(
+            world.information[0].visibility,
+            InformationVisibility::Unverified
+        );
+        assert_eq!(sched.len(), 1);
+        let pending = &sched.pending()[0];
+        assert_eq!(pending.scheduled_key.time, u64::MAX);
+        assert!(matches!(
+            pending.command,
+            Command::ResolveInformation { .. }
+        ));
+    }
+
+    #[test]
+    fn reveal_at_u64_max_returns_world_time_overflow() {
+        let (mut world, mut sched) = fresh();
+        let env = envelope_at(u64::MAX, reveal(InformationVisibility::Unverified));
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::WorldTimeOverflow));
+    }
+
+    #[test]
+    fn world_time_overflow_restores_world_and_scheduler_completely() {
+        let (mut world, mut sched) = fresh();
+        // 기존 스케줄·카운터를 남겨 두고 복원을 검증한다.
+        submit_command(
+            &mut world,
+            &mut sched,
+            SubmitSpec {
+                time: 42,
+                phase: Phase::UiSummary,
+                priority: 0,
+                actor_id: "pre".into(),
+                issued_by: "test".into(),
+                caused_by_event: None,
+                command: Command::SetPlayerStance {
+                    player_id: "player-ren-arden".into(),
+                    stance: "pre".into(),
+                },
+                command_id: "pre-cmd".into(),
+            },
+        )
+        .unwrap();
+        world.information[0].visibility = InformationVisibility::Private;
+        let before_world = world.clone();
+        let before_sched = sched.clone();
+        let env = envelope_at(u64::MAX, reveal(InformationVisibility::Unverified));
+        let err = execute_command(&mut world, &mut sched, &env).unwrap_err();
+        assert!(matches!(err, CoreError::WorldTimeOverflow));
+        assert_world_sched_unchanged(&world, &sched, &before_world, &before_sched);
+        assert_eq!(
+            world.information[0].visibility,
+            InformationVisibility::Private
+        );
+        assert_eq!(world.events.len(), 0);
+        assert_eq!(world.next_event_id, before_world.next_event_id);
+        assert_eq!(
+            world.next_command_sequence,
+            before_world.next_command_sequence
+        );
+        assert_eq!(sched.next_sequence(), before_sched.next_sequence());
+        assert_eq!(world.rng.draws(), before_world.rng.draws());
+        assert_eq!(world.rng.state(), before_world.rng.state());
+        // 후속 ResolveInformation이 등록되지 않음
+        assert_eq!(sched.len(), 1);
+        assert!(!matches!(
+            sched.pending()[0].command,
+            Command::ResolveInformation { .. }
+        ));
     }
 }

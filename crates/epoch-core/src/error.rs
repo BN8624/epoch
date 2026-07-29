@@ -5,18 +5,44 @@ use std::fmt;
 /// 명령 검증·실행 오류. 외부 오류 crate 없이 표현한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreError {
-    UnknownPlayer { id: String },
-    UnknownCandidate { id: String },
-    UnknownHouse { id: String },
-    UnknownInformation { id: String },
-    MissingCandidateForSupport { house_id: String },
-    InvalidChanceBasisPoints { value: u32 },
-    VisibilityRegression { from: String, to: String },
-    EventIdCollision { event_id: u64 },
-    CommandSequenceCollision { sequence: u64 },
+    UnknownPlayer {
+        id: String,
+    },
+    UnknownCandidate {
+        id: String,
+    },
+    UnknownHouse {
+        id: String,
+    },
+    UnknownInformation {
+        id: String,
+    },
+    MissingCandidateForSupport {
+        house_id: String,
+    },
+    UnexpectedCandidateForUndecided {
+        house_id: String,
+        candidate_id: String,
+    },
+    InvalidChanceBasisPoints {
+        value: u32,
+    },
+    VisibilityRegression {
+        from: String,
+        to: String,
+    },
+    EventIdCollision {
+        event_id: u64,
+    },
+    CommandSequenceCollision {
+        sequence: u64,
+    },
     EventIdOverflow,
     CommandSequenceOverflow,
-    InvalidActionCode { action_code: String },
+    WorldTimeOverflow,
+    InvalidActionCode {
+        action_code: String,
+    },
     Serialization(String),
 }
 
@@ -31,6 +57,15 @@ impl fmt::Display for CoreError {
                 write!(
                     f,
                     "declared support requires candidate for house: {house_id}"
+                )
+            }
+            CoreError::UnexpectedCandidateForUndecided {
+                house_id,
+                candidate_id,
+            } => {
+                write!(
+                    f,
+                    "undecided support cannot have candidate for house: {house_id} (candidate: {candidate_id})"
                 )
             }
             CoreError::InvalidChanceBasisPoints { value } => {
@@ -49,6 +84,7 @@ impl fmt::Display for CoreError {
             CoreError::CommandSequenceOverflow => {
                 write!(f, "command sequence counter overflow")
             }
+            CoreError::WorldTimeOverflow => write!(f, "world time overflow"),
             CoreError::InvalidActionCode { action_code } => {
                 write!(f, "invalid action code: {action_code}")
             }
