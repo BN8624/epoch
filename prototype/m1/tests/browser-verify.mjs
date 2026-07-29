@@ -471,6 +471,26 @@ try {
     activeIsHouse: document.activeElement?.classList?.contains('house-card') || false,
   })`);
 
+  // 행동별 확인 패널 표시명 (선택 직후 일치 검증)
+  const ACTION_CONFIRM = {
+    'action-a': '다리안을 공개 지지하고 직위 약속을 공표한다',
+    'action-b': '세리아와 비밀 혼인 동맹을 맺고 지지를 약속한다',
+    'action-c': '미레아에게 알레시아 계통의 권리 기록 사본을 제공한다',
+    'action-d': '다리안이 같은 핵심 직위를 중복 약속했다는 정보를 세리아 측에 넘긴다',
+    'action-e': '세 진영의 요구를 모두 거절하고 결정을 미룬다',
+  };
+
+  async function readConfirmPanel() {
+    return cdp.eval(`({
+      confirmVisible: !document.querySelector('#confirm-panel')?.hidden,
+      chosenText: document.querySelector('#confirm-panel .confirm-chosen')?.textContent || '',
+      hasConfirm: !!document.querySelector('#btn-confirm'),
+      hasCancel: !!document.querySelector('#btn-cancel'),
+      phaseDecision: !document.querySelector('#confirm-panel')?.hidden &&
+        !!document.querySelector('#btn-confirm'),
+    })`);
+  }
+
   // --- M-1.2: 제안·행동·확인·결과 핵심 흐름 ---
   const proposalExpand = await cdp.eval(`(() => {
     const btn = document.querySelectorAll('.proposal-toggle')[0];
@@ -484,26 +504,27 @@ try {
   })()`);
   await sleep(150);
 
-  // 행동 A 선택 → 확인 패널
+  // 행동 A 선택 → 확인 패널 (decision 상태)
   await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
   await sleep(200);
-  const confirmA = await cdp.eval(`({
-    confirmVisible: !document.querySelector('#confirm-panel')?.hidden,
-    chosenText: document.querySelector('#confirm-panel .confirm-chosen')?.textContent || '',
-    hasConfirm: !!document.querySelector('#btn-confirm'),
-    hasCancel: !!document.querySelector('#btn-cancel'),
-  })`);
+  const confirmA = await readConfirmPanel();
+  // 데스크톱 decision 레이아웃: 확인 패널·버튼 가로 넘침·겹침
+  const desktopDecision = await measure(1280, 720);
 
-  // 돌아가기
+  // 돌아가기 → 선택 화면 복귀
   await cdp.eval(`document.querySelector('#btn-cancel')?.click()`);
   await sleep(200);
   const afterCancel = await cdp.eval(`({
     confirmHidden: !!document.querySelector('#confirm-panel')?.hidden,
     outcomeHidden: !!document.querySelector('#outcome-section')?.hidden,
     selectedActions: document.querySelectorAll('.action-card.is-selected').length,
+    focusAction: document.activeElement?.classList?.contains('action-card') || false,
+    actionEnabled: !document.querySelector('[data-action-id="action-a"]')?.disabled,
+    reviewReady: !!document.querySelector('#confirm-panel')?.hidden &&
+      !!document.querySelector('#outcome-section')?.hidden,
   })`);
 
-  // 행동 A 확정
+  // 행동 A 확정 → resolved
   await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
   await sleep(150);
   await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
@@ -516,6 +537,8 @@ try {
     focusIsOutcome: document.activeElement?.id === 'outcome-panel' || document.activeElement?.closest?.('#outcome-panel') != null,
     activeId: document.activeElement?.id || '',
   })`);
+  // 데스크톱 resolved 레이아웃: 결과 패널·버튼
+  const desktopResolved = await measure(1280, 720);
 
   // 다른 선택 시도 후 행동 B
   await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
@@ -529,6 +552,7 @@ try {
 
   await cdp.eval(`document.querySelector('[data-action-id="action-b"]').click()`);
   await sleep(150);
+  const confirmB = await readConfirmPanel();
   await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
   await sleep(300);
   const resultB = await cdp.eval(`({
@@ -544,6 +568,7 @@ try {
   await sleep(200);
   await cdp.eval(`document.querySelector('[data-action-id="action-c"]').click()`);
   await sleep(150);
+  const confirmC = await readConfirmPanel();
   await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
   await sleep(300);
   const resultC = await cdp.eval(`({
@@ -557,6 +582,7 @@ try {
   await sleep(200);
   await cdp.eval(`document.querySelector('[data-action-id="action-d"]').click()`);
   await sleep(150);
+  const confirmD = await readConfirmPanel();
   await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
   await sleep(300);
   const resultD = await cdp.eval(`({
@@ -570,6 +596,7 @@ try {
   await sleep(200);
   await cdp.eval(`document.querySelector('[data-action-id="action-e"]').click()`);
   await sleep(150);
+  const confirmE = await readConfirmPanel();
   await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
   await sleep(300);
   const resultE = await cdp.eval(`({
@@ -592,7 +619,17 @@ try {
     sorenStance: document.querySelector('[data-house-id="house-soren"] .house-stance')?.textContent?.replace(/\\s+/g,' ').trim(),
   })`);
 
+  // 모바일 review → decision → resolved 레이아웃
   const mobile = await measure(390, 664);
+  await cdp.eval(`document.querySelector('[data-action-id="action-a"]').click()`);
+  await sleep(200);
+  const mobileDecision = await measure(390, 664);
+  await cdp.eval(`document.querySelector('#btn-confirm')?.click()`);
+  await sleep(300);
+  const mobileResolved = await measure(390, 664);
+  // 검증 후 재시작해 초기 상태로 정리
+  await cdp.eval(`document.querySelector('#btn-retry')?.click()`);
+  await sleep(200);
 
   const consoleErrors = cdp.console.filter(
     (c) => c.type === 'error' || c.type === 'exception' || c.exceptionDetails,
@@ -603,6 +640,8 @@ try {
     server: { url: site.url, port: site.port },
     semantics,
     desktop,
+    desktopDecision,
+    desktopResolved,
     candidateClicks,
     houseClicks,
     afterPlayer,
@@ -612,6 +651,10 @@ try {
     afterHouseKey2,
     proposalExpand,
     confirmA,
+    confirmB,
+    confirmC,
+    confirmD,
+    confirmE,
     afterCancel,
     resultA,
     afterRetry,
@@ -621,6 +664,8 @@ try {
     resultE,
     finalReset,
     mobile,
+    mobileDecision,
+    mobileResolved,
     consoleLogCount: cdp.console.length,
     consoleErrors,
   };
@@ -654,10 +699,31 @@ try {
   if (!(proposalExpand?.expanded >= 1)) failures.push('proposal expand');
   if (!proposalExpand?.bodyVisible) failures.push('proposal body');
   if (!confirmA?.confirmVisible) failures.push('confirm panel after select A');
-  if (!confirmA?.chosenText?.includes('다리안을 공개 지지')) failures.push('confirm shows action A label');
+  if (!confirmA?.chosenText?.includes(ACTION_CONFIRM['action-a'])) {
+    failures.push('confirm shows action A label');
+  }
   if (!confirmA?.hasConfirm || !confirmA?.hasCancel) failures.push('confirm buttons');
+  // 행동 B~E: 선택 직후 확인 패널이 해당 행동명으로 갱신되는지 검증
+  for (const [id, label, panel] of [
+    ['action-b', ACTION_CONFIRM['action-b'], confirmB],
+    ['action-c', ACTION_CONFIRM['action-c'], confirmC],
+    ['action-d', ACTION_CONFIRM['action-d'], confirmD],
+    ['action-e', ACTION_CONFIRM['action-e'], confirmE],
+  ]) {
+    if (!panel?.confirmVisible) failures.push(`confirm panel after select ${id}`);
+    if (!panel?.chosenText?.includes(label)) {
+      failures.push(`confirm shows ${id} label (got ${panel?.chosenText})`);
+    }
+    if (!panel?.hasConfirm || !panel?.hasCancel) failures.push(`confirm buttons for ${id}`);
+  }
   if (!afterCancel?.confirmHidden) failures.push('cancel hides confirm');
   if (!afterCancel?.outcomeHidden) failures.push('cancel keeps outcome hidden');
+  if (afterCancel?.selectedActions !== 0) {
+    failures.push(`cancel clears selection (selectedActions=${afterCancel?.selectedActions})`);
+  }
+  if (!afterCancel?.reviewReady) failures.push('cancel returns to selection screen');
+  if (!afterCancel?.focusAction) failures.push('cancel restores focus to action card');
+  if (!afterCancel?.actionEnabled) failures.push('cancel keeps actions enabled');
   if (!resultA?.outcomeVisible) failures.push('outcome after A');
   if (!resultA?.body?.includes('다리안 공개 지지')) failures.push('outcome A stance');
   if (!resultA?.sorenStance?.includes('동요')) failures.push(`soren wavering after A got ${resultA?.sorenStance}`);
@@ -689,6 +755,18 @@ try {
   if (finalReset?.actions !== 5) failures.push('final reset actions enabled');
   if (!finalReset?.sorenStance?.includes('다리안')) failures.push('final reset soren');
 
+  // decision/resolved 상태 레이아웃 (데스크톱·모바일)
+  for (const [name, snap] of [
+    ['desktop decision', desktopDecision],
+    ['desktop resolved', desktopResolved],
+    ['mobile decision', mobileDecision],
+    ['mobile resolved', mobileResolved],
+  ]) {
+    if (snap?.hasHScroll) failures.push(`${name} horizontal scroll`);
+    if (snap?.layoutIssues?.length) {
+      failures.push(`${name} layout: ${snap.layoutIssues.join(';')}`);
+    }
+  }
   for (let i = 0; i < candidateExpect.length; i++) {
     const exp = candidateExpect[i];
     const got = candidateClicks[i];

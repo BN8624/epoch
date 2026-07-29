@@ -58,34 +58,102 @@ describe('제안·행동 fixture 불변식', () => {
   });
 
   it('모든 세력을 동시에 만족시키는 행동이 없다', () => {
+    // 손실·위험 유무와 독립적으로 helps·benefits의 진영별 긍정 효과만 판별한다.
+    // (예: benefits에 세 후보 신뢰 증가가 모두 있으면 손실이 있어도 실패)
+    const FACTIONS = ['다리안', '세리아', '미레아'];
+
+    function positivelySatisfies(action, name) {
+      const helps = action.helps || '';
+      if (helps.includes(name) && !/돕지 않|거절|중립/.test(helps)) {
+        return true;
+      }
+      for (const line of action.benefits) {
+        if (!line.includes(name)) continue;
+        // 균열·하락 등 피해 서술만 있는 이익 문장은 해당 진영 만족으로 보지 않는다.
+        if (/(균열|하락|적대|경계|의심|거부|거절|배신|보복|상실|박탈)/.test(line)) {
+          const stillPositive = new RegExp(
+            `${name}.{0,16}(신뢰|우호).{0,8}(증가|상승)|${name}.{0,12}(동맹|협력)`,
+          ).test(line);
+          if (!stillPositive) continue;
+        }
+        if (
+          new RegExp(`${name}.{0,20}(신뢰|우호).{0,8}(증가|상승)`).test(line) ||
+          new RegExp(`${name}.{0,16}(동맹|협력|연결|인정|보상|영향력)`).test(line) ||
+          new RegExp(`(신뢰|우호).{0,8}(증가|상승).{0,16}${name}`).test(line)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
     for (const a of ACTIONS) {
-      const text = [a.label, a.helps, ...a.benefits, ...a.losses, ...a.risks].join(' ');
-      const helpsAll =
-        /세리아/.test(text) &&
-        /다리안/.test(text) &&
-        /미레아/.test(text) &&
-        a.losses.length === 0 &&
-        a.risks.length === 0;
-      assert.equal(helpsAll, false, a.id);
-      // 이익만 있고 손실·위험이 없는 행동도 금지에 가깝게 이미 위에서 검사
-      assert.ok(a.losses.length > 0 || a.risks.length > 0, a.id);
+      const satisfied = FACTIONS.filter((name) => positivelySatisfies(a, name));
+      assert.ok(
+        satisfied.length < FACTIONS.length,
+        `${a.id} satisfies all factions: ${satisfied.join(',')}`,
+      );
     }
   });
 
   it('모든 행동 결과는 존재하는 후보·가문·플레이어를 참조한다', () => {
     const candidateIds = new Set(scenario.candidates.map((c) => c.id));
     const houseIds = new Set(scenario.houses.map((h) => h.id));
+    const proposalIds = new Set(PROPOSALS.map((p) => p.id));
+
+    function assertCandidateRef(value, context) {
+      assert.ok(
+        value === null || value === undefined || candidateIds.has(value),
+        `${context}: invalid candidate id ${value}`,
+      );
+    }
+    function assertHouseRef(value, context) {
+      assert.ok(
+        value === null || value === undefined || houseIds.has(value),
+        `${context}: invalid house id ${value}`,
+      );
+    }
+
+    for (const p of PROPOSALS) {
+      assertCandidateRef(p.relatedCandidateId, `proposal ${p.id} relatedCandidateId`);
+      assertHouseRef(p.relatedHouseId, `proposal ${p.id} relatedHouseId`);
+    }
+
     for (const a of ACTIONS) {
+      if (a.responseProposalId != null) {
+        assert.ok(
+          proposalIds.has(a.responseProposalId),
+          `${a.id} responseProposalId ${a.responseProposalId}`,
+        );
+      }
+
       const outcome = OUTCOMES[a.id];
       assert.ok(outcome, a.id);
+      assert.equal(outcome.actionId, a.id);
       const patch = outcome.worldPatch;
-      for (const hid of Object.keys(patch.houseOverrides ?? {})) {
-        assert.ok(houseIds.has(hid), hid);
-      }
-      for (const cid of Object.keys(patch.candidateOverrides ?? {})) {
-        assert.ok(candidateIds.has(cid), cid);
-      }
       assert.equal(typeof patch.playerStance, 'string');
+
+      for (const [hid, override] of Object.entries(patch.houseOverrides ?? {})) {
+        assert.ok(houseIds.has(hid), `${a.id} houseOverride key ${hid}`);
+        if (override && typeof override === 'object' && 'supportCandidateId' in override) {
+          assertCandidateRef(
+            override.supportCandidateId,
+            `${a.id} houseOverrides[${hid}].supportCandidateId`,
+          );
+        }
+      }
+      for (const [cid, override] of Object.entries(patch.candidateOverrides ?? {})) {
+        assert.ok(candidateIds.has(cid), `${a.id} candidateOverride key ${cid}`);
+        if (override && typeof override === 'object') {
+          if ('id' in override) assertCandidateRef(override.id, `${a.id} candidateOverrides[${cid}].id`);
+          if ('supportCandidateId' in override) {
+            assertCandidateRef(
+              override.supportCandidateId,
+              `${a.id} candidateOverrides[${cid}].supportCandidateId`,
+            );
+          }
+        }
+      }
     }
   });
 
