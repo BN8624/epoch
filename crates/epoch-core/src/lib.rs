@@ -9,6 +9,8 @@ pub mod rng;
 pub mod runtime;
 pub mod save;
 pub mod scheduler;
+pub mod world;
+pub mod worldgen;
 
 pub use command::{
     Command, CommandEnvelope, EXPOSE_DUPLICATE_PROMISE, SubmitSpec, execute_command, submit_command,
@@ -26,3 +28,8 @@ pub use rng::DeterministicRng;
 pub use runtime::RuntimeState;
 pub use save::{SAVE_SCHEMA_VERSION, SaveEnvelope, load_runtime_from_bytes, save_runtime_to_bytes};
 pub use scheduler::{Phase, ScheduledKey, Scheduler, SchedulerSnapshot};
+pub use world::{
+    GenerationMeta, Realm, Ruler, Territory, WORLD_HEIGHT, WORLD_REALM_COUNT, WORLD_RULER_COUNT,
+    WORLD_SCHEMA_VERSION, WORLD_TERRITORY_COUNT, WORLD_WIDTH, WorldSkeleton,
+};
+pub use worldgen::{generate_world, validate_world};
