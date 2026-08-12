@@ -52,6 +52,8 @@ pub enum CoreError {
     },
     /// 로드 직후 불변식 위반 (부분 상태 반환 금지).
     InvalidSaveInvariant(String),
+    /// 세계 골격 생성·검증 불변식 위반 (fail closed).
+    InvalidWorld(String),
 }
 
 impl fmt::Display for CoreError {
@@ -104,6 +106,7 @@ impl fmt::Display for CoreError {
             CoreError::InvalidSaveInvariant(msg) => {
                 write!(f, "invalid save invariant: {msg}")
             }
+            CoreError::InvalidWorld(msg) => write!(f, "invalid world: {msg}"),
         }
     }
 }

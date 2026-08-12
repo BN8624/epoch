@@ -1,8 +1,8 @@
 // EPOCH lab CLI — demo 및 결정론 재생·저장 검사
 
 use epoch_core::{
-    create_demo_checkpoint, load_runtime_from_bytes, run_demo, run_demo_to_runtime,
-    save_runtime_to_bytes,
+    create_demo_checkpoint, generate_world, load_runtime_from_bytes, run_demo, run_demo_to_runtime,
+    save_runtime_to_bytes, validate_world,
 };
 use std::env;
 use std::fs;
@@ -25,6 +25,8 @@ fn main() -> ExitCode {
         "demo" => cmd_demo(&args),
         "replay-check" => cmd_replay_check(&args),
         "save-check" => cmd_save_check(&args),
+        "world" => cmd_world(&args),
+        "world-check" => cmd_world_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -43,12 +45,16 @@ Usage:
   cargo run -p epoch-lab -- demo <seed>
   cargo run -p epoch-lab -- replay-check <seed>
   cargo run -p epoch-lab -- save-check <seed>
+  cargo run -p epoch-lab -- world <seed>
+  cargo run -p epoch-lab -- world-check <seed>
 
 Commands:
   help           Show this help
   demo           Run fixed succession demo and print pretty JSON
   replay-check   Run demo twice and verify byte-identical compact JSON
   save-check     Checkpoint mid-run, save/load via temp file, resume vs baseline
+  world          Generate world skeleton and print pretty JSON
+  world-check    Generate twice, verify determinism and world invariants
 "
     );
 }
@@ -61,6 +67,8 @@ Usage:
   cargo run -p epoch-lab -- demo <seed>
   cargo run -p epoch-lab -- replay-check <seed>
   cargo run -p epoch-lab -- save-check <seed>
+  cargo run -p epoch-lab -- world <seed>
+  cargo run -p epoch-lab -- world-check <seed>
 "
     );
 }
@@ -73,6 +81,103 @@ fn parse_seed(args: &[String]) -> Result<u64, String> {
             .map_err(|_| format!("invalid seed '{s}': expected unsigned 64-bit integer")),
         _ => Err("too many arguments: expected a single seed".to_string()),
     }
+}
+
+fn cmd_world(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: world generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_world_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_world(&a) {
+        eprintln!("error: world invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!(
+        "WORLD_OK seed={seed} realms={} territories={} rulers={} template={} bytes={}",
+        a.realms.len(),
+        a.territories.len(),
+        a.rulers.len(),
+        a.generation.template_id,
+        bytes_a.len()
+    );
+    ExitCode::SUCCESS
 }
 
 fn cmd_demo(args: &[String]) -> ExitCode {
