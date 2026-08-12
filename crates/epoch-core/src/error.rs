@@ -54,6 +54,8 @@ pub enum CoreError {
     InvalidSaveInvariant(String),
     /// 세계 골격 생성·검증 불변식 위반 (fail closed).
     InvalidWorld(String),
+    /// 인구·가계 골격 생성·검증 불변식 위반 (fail closed).
+    InvalidPopulation(String),
 }
 
 impl fmt::Display for CoreError {
@@ -107,6 +109,7 @@ impl fmt::Display for CoreError {
                 write!(f, "invalid save invariant: {msg}")
             }
             CoreError::InvalidWorld(msg) => write!(f, "invalid world: {msg}"),
+            CoreError::InvalidPopulation(msg) => write!(f, "invalid population: {msg}"),
         }
     }
 }

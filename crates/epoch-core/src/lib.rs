@@ -5,6 +5,8 @@ pub mod demo;
 pub mod error;
 pub mod event;
 pub mod model;
+pub mod population;
+pub mod populationgen;
 pub mod rng;
 pub mod runtime;
 pub mod save;
@@ -24,6 +26,12 @@ pub use event::{ContributionClass, Event, InfluenceLink, RandomDraw, StateChange
 pub use model::{
     Candidate, House, Information, InformationVisibility, Player, SupportStatus, WorldState,
 };
+pub use population::{
+    DYNASTIC_WORLD_SCHEMA_VERSION, DynasticWorld, GenerationBand, HOUSE_COUNT, PERSON_COUNT,
+    PopulationGenerationMeta, PopulationSkeleton, RulerPersonLink,
+};
+// population::House is available as epoch_core::population::House (avoids clash with model::House)
+pub use populationgen::{generate_dynastic_world, generate_population, validate_population};
 pub use rng::DeterministicRng;
 pub use runtime::RuntimeState;
 pub use save::{SAVE_SCHEMA_VERSION, SaveEnvelope, load_runtime_from_bytes, save_runtime_to_bytes};
