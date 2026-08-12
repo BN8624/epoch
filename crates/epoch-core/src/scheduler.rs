@@ -1,5 +1,6 @@
 // 결정론적 스케줄 키와 단계 순서
 
+use crate::command::CommandEnvelope;
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -45,10 +46,20 @@ impl Ord for ScheduledKey {
     }
 }
 
+/// 저장·복원용 스케줄러 스냅샷. 필드는 명시적이며 결정론적으로 직렬화한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchedulerSnapshot {
+    /// 안정 키 오름차순으로 정렬된 pending 큐.
+    pub queue: Vec<CommandEnvelope>,
+    pub next_sequence: u64,
+    /// 오름차순 정렬된 사용 완료 sequence (중복 없음).
+    pub used_sequences: Vec<u64>,
+}
+
 /// Vec 정렬 기반 최소 스케줄러. 단조 증가 sequence를 소유한다.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Scheduler {
-    queue: Vec<crate::command::CommandEnvelope>,
+    queue: Vec<CommandEnvelope>,
     /// 다음에 부여할 sequence.
     next_sequence: u64,
     /// 등록에 사용된 sequence 집합 (pop 후에도 재사용 금지).
@@ -77,11 +88,35 @@ impl Scheduler {
         self.next_sequence
     }
 
+    /// 이미 사용된 sequence 집합 (오름차순 반복).
+    pub fn used_sequences(&self) -> impl Iterator<Item = u64> + '_ {
+        self.used_sequences.iter().copied()
+    }
+
+    /// 결정론적 스냅샷을 만든다. 큐는 안정 키 순으로 정렬한다.
+    pub fn to_snapshot(&self) -> SchedulerSnapshot {
+        let mut queue = self.queue.clone();
+        queue.sort_by(|a, b| a.scheduled_key.cmp(&b.scheduled_key));
+        SchedulerSnapshot {
+            queue,
+            next_sequence: self.next_sequence,
+            used_sequences: self.used_sequences.iter().copied().collect(),
+        }
+    }
+
+    /// 스냅샷을 검증한 뒤 스케줄러를 복원한다. 정상 생성 불가 상태는 거부한다.
+    pub fn from_snapshot(snapshot: SchedulerSnapshot) -> Result<Self, CoreError> {
+        validate_scheduler_snapshot(&snapshot)?;
+        let used_sequences: BTreeSet<u64> = snapshot.used_sequences.into_iter().collect();
+        Ok(Self {
+            queue: snapshot.queue,
+            next_sequence: snapshot.next_sequence,
+            used_sequences,
+        })
+    }
+
     /// 단조 증가 sequence를 부여해 등록한다. 충돌·오버플로 시 큐를 변경하지 않는다.
-    pub fn register(
-        &mut self,
-        mut envelope: crate::command::CommandEnvelope,
-    ) -> Result<u64, CoreError> {
+    pub fn register(&mut self, mut envelope: CommandEnvelope) -> Result<u64, CoreError> {
         let sequence = self.next_sequence;
         if self.used_sequences.contains(&sequence)
             || self
@@ -111,7 +146,7 @@ impl Scheduler {
     }
 
     /// 안정 키 오름차순으로 다음 명령을 꺼낸다.
-    pub fn pop_next(&mut self) -> Option<crate::command::CommandEnvelope> {
+    pub fn pop_next(&mut self) -> Option<CommandEnvelope> {
         if self.queue.is_empty() {
             return None;
         }
@@ -120,9 +155,80 @@ impl Scheduler {
         Some(self.queue.remove(0))
     }
 
-    pub fn pending(&self) -> &[crate::command::CommandEnvelope] {
+    pub fn pending(&self) -> &[CommandEnvelope] {
         &self.queue
     }
+}
+
+/// 정상 Scheduler에서 생성할 수 없는 스냅샷을 거부한다.
+fn validate_scheduler_snapshot(snapshot: &SchedulerSnapshot) -> Result<(), CoreError> {
+    // used_sequences: 중복 없음·엄격 오름차순. 비어 있지 않으면 연속 구간이며
+    // 마지막 값이 next_sequence - 1 이어야 한다 (정상 register 계약).
+    if snapshot.used_sequences.is_empty() {
+        // with_next_sequence(n) 초기 상태 허용: used 비어 있고 next_sequence 임의.
+    } else {
+        let first = snapshot.used_sequences[0];
+        for (i, &seq) in snapshot.used_sequences.iter().enumerate() {
+            let expected = match first.checked_add(i as u64) {
+                Some(v) => v,
+                None => {
+                    return Err(CoreError::InvalidSaveInvariant(
+                        "used_sequences range overflows u64".into(),
+                    ));
+                }
+            };
+            if seq != expected {
+                return Err(CoreError::InvalidSaveInvariant(
+                    "used_sequences must be a contiguous ascending range".into(),
+                ));
+            }
+        }
+        let last = *snapshot
+            .used_sequences
+            .last()
+            .expect("non-empty used_sequences");
+        let expected_next = match last.checked_add(1) {
+            Some(v) => v,
+            None => {
+                return Err(CoreError::InvalidSaveInvariant(
+                    "used_sequences last + 1 overflows u64".into(),
+                ));
+            }
+        };
+        if snapshot.next_sequence != expected_next {
+            return Err(CoreError::InvalidSaveInvariant(format!(
+                "used_sequences last must be next_sequence - 1 (last={last}, next_sequence={})",
+                snapshot.next_sequence
+            )));
+        }
+    }
+
+    // queue는 ScheduledKey 오름차순(결정론 직렬화 순서)이어야 한다.
+    for window in snapshot.queue.windows(2) {
+        if window[0].scheduled_key >= window[1].scheduled_key {
+            return Err(CoreError::InvalidSaveInvariant(
+                "queue must be strictly sorted by ScheduledKey ascending".into(),
+            ));
+        }
+    }
+
+    // pending sequence 중복 없음, 모두 used에 포함.
+    let mut pending_seqs = BTreeSet::new();
+    for env in &snapshot.queue {
+        let seq = env.scheduled_key.sequence;
+        if !pending_seqs.insert(seq) {
+            return Err(CoreError::InvalidSaveInvariant(format!(
+                "duplicate pending command sequence: {seq}"
+            )));
+        }
+        if snapshot.used_sequences.binary_search(&seq).is_err() {
+            return Err(CoreError::InvalidSaveInvariant(format!(
+                "pending sequence {seq} is not in used_sequences"
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -274,5 +380,114 @@ mod tests {
             CoreError::CommandSequenceCollision { sequence: 0 }
         ));
         assert_eq!(sched.len(), 1);
+    }
+
+    #[test]
+    fn snapshot_restore_round_trip() {
+        let mut sched = Scheduler::new();
+        sched
+            .register(envelope_template(
+                10,
+                Phase::ActionExecution,
+                0,
+                "a",
+                "later",
+            ))
+            .unwrap();
+        sched
+            .register(envelope_template(
+                5,
+                Phase::ActionExecution,
+                0,
+                "a",
+                "earlier",
+            ))
+            .unwrap();
+        let _ = sched.pop_next();
+        let snap = sched.to_snapshot();
+        let restored = Scheduler::from_snapshot(snap.clone()).unwrap();
+        assert_eq!(restored.next_sequence(), sched.next_sequence());
+        assert_eq!(restored.len(), sched.len());
+        assert_eq!(restored.to_snapshot(), snap);
+        // used sequences 보존: 0,1 사용됨
+        let used: Vec<u64> = restored.used_sequences().collect();
+        assert_eq!(used, vec![0, 1]);
+    }
+
+    #[test]
+    fn from_snapshot_rejects_duplicate_pending_sequence() {
+        let mut sched = Scheduler::new();
+        sched
+            .register(envelope_template(1, Phase::ActionExecution, 0, "a", "a"))
+            .unwrap();
+        let mut snap = sched.to_snapshot();
+        let dup = snap.queue[0].clone();
+        snap.queue.push(dup);
+        let err = Scheduler::from_snapshot(snap).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidSaveInvariant(_)));
+    }
+
+    #[test]
+    fn from_snapshot_rejects_non_contiguous_used_sequences() {
+        // used [0, 2], next=3 은 정상 register로 만들 수 없다.
+        let snap = SchedulerSnapshot {
+            queue: vec![],
+            next_sequence: 3,
+            used_sequences: vec![0, 2],
+        };
+        let err = Scheduler::from_snapshot(snap).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidSaveInvariant(_)));
+        assert!(
+            format!("{err}").contains("contiguous") || format!("{err}").contains("used_sequences"),
+            "err: {err}"
+        );
+    }
+
+    #[test]
+    fn from_snapshot_rejects_used_last_not_next_minus_one() {
+        // 연속이어도 마지막이 next_sequence-1이 아니면 거부.
+        let snap = SchedulerSnapshot {
+            queue: vec![],
+            next_sequence: 5,
+            used_sequences: vec![0, 1],
+        };
+        let err = Scheduler::from_snapshot(snap).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidSaveInvariant(_)));
+    }
+
+    #[test]
+    fn from_snapshot_rejects_unsorted_queue() {
+        let mut sched = Scheduler::new();
+        sched
+            .register(envelope_template(
+                10,
+                Phase::ActionExecution,
+                0,
+                "a",
+                "later",
+            ))
+            .unwrap();
+        sched
+            .register(envelope_template(
+                5,
+                Phase::ActionExecution,
+                0,
+                "a",
+                "earlier",
+            ))
+            .unwrap();
+        let mut snap = sched.to_snapshot();
+        // to_snapshot은 정렬한다. 의도적으로 역순으로 변조.
+        snap.queue.reverse();
+        assert!(
+            snap.queue[0].scheduled_key > snap.queue[1].scheduled_key,
+            "precondition: queue must be unsorted after reverse"
+        );
+        let err = Scheduler::from_snapshot(snap).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidSaveInvariant(_)));
+        assert!(
+            format!("{err}").contains("sorted") || format!("{err}").contains("ScheduledKey"),
+            "err: {err}"
+        );
     }
 }

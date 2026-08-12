@@ -1,9 +1,12 @@
 // 결정론·도메인 결과 통합 테스트
 
 use epoch_core::{
-    ContributionClass, DeterministicRng, InformationVisibility, SupportStatus, run_demo,
+    ContributionClass, DemoResult, DeterministicRng, InformationVisibility, SupportStatus,
+    WorldState, create_demo_checkpoint, create_demo_runtime, load_runtime_from_bytes, run_demo,
+    run_demo_to_runtime, run_demo_via_checkpoint, save_runtime_to_bytes,
 };
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// 현재 소스에서 빌드된 바이너리만 검사하도록 항상 cargo run을 사용한다.
@@ -17,6 +20,56 @@ fn run_epoch_lab(args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .expect("cargo run -p epoch-lab")
+}
+
+/// 시스템 temp에 남아 있는 epoch-lab save-check 임시 파일 목록 (seed별).
+fn list_save_check_temp_files(seed: u64) -> Vec<PathBuf> {
+    let temp = std::env::temp_dir();
+    let suffix = format!("-{seed}.json");
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(&temp) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("epoch-save-check-") && name.ends_with(&suffix) {
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 최종 RuntimeState를 기존 run_demo와 동일한 DemoResult 조립 경로로 변환한다.
+fn demo_result_from_final_runtime(
+    seed: u64,
+    final_runtime: &epoch_core::RuntimeState,
+) -> DemoResult {
+    let initial_state = WorldState::new_initial(seed);
+    let setup = create_demo_runtime(seed).expect("create_demo_runtime for DemoResult path");
+    let submitted_commands = setup.scheduler.pending().to_vec();
+    let events = final_runtime.world.events.clone();
+    DemoResult {
+        schema_version: 1,
+        seed,
+        initial_state,
+        submitted_commands,
+        final_state: final_runtime.world.clone(),
+        events,
+    }
+}
+
+fn assert_save_check_temp_cleaned(_seed: u64, before: &[PathBuf], after: &[PathBuf]) {
+    let leftovers: Vec<&Path> = after
+        .iter()
+        .filter(|p| !before.contains(p))
+        .map(PathBuf::as_path)
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "save-check left temp files after success: {leftovers:?}"
+    );
 }
 
 #[test]
@@ -253,4 +306,119 @@ fn cli_invalid_args_nonzero_exit() {
         stderr.contains("invalid seed") || stderr.contains("error"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn checkpoint_has_pending_commands_and_zero_draws() {
+    let cp = create_demo_checkpoint(1).expect("checkpoint");
+    assert_eq!(cp.world.world_time, 100);
+    assert_eq!(cp.world.events.len(), 1);
+    assert_eq!(cp.world.events[0].event_type, "player_action_recorded");
+    assert_eq!(cp.scheduler.len(), 3);
+    assert_eq!(cp.world.rng.draws(), 0);
+    assert_eq!(cp.world.player.stance, "house_darian_support");
+    let soren = cp
+        .world
+        .houses
+        .iter()
+        .find(|h| h.id == "house-soren")
+        .unwrap();
+    assert_eq!(soren.support_status, SupportStatus::Declared);
+    assert_eq!(
+        cp.world.information[0].visibility,
+        InformationVisibility::Private
+    );
+}
+
+#[test]
+fn load_preserves_pending_command_count_and_content() {
+    let cp = create_demo_checkpoint(1).expect("checkpoint");
+    let bytes = save_runtime_to_bytes(&cp).expect("save");
+    let loaded = load_runtime_from_bytes(&bytes).expect("load");
+    assert_eq!(loaded.scheduler.len(), cp.scheduler.len());
+    assert_eq!(
+        loaded.scheduler.to_snapshot().queue,
+        cp.scheduler.to_snapshot().queue
+    );
+    assert_eq!(
+        loaded.scheduler.next_sequence(),
+        cp.scheduler.next_sequence()
+    );
+    assert_eq!(loaded.world.rng.draws(), 0);
+    assert_eq!(loaded.world.rng, cp.world.rng);
+}
+
+#[test]
+fn uninterrupted_vs_save_load_resume_full_equality() {
+    let baseline = run_demo_to_runtime(1).expect("baseline");
+    let (resumed, checkpoint_bytes) = run_demo_via_checkpoint(1).expect("resumed");
+
+    assert_eq!(baseline.world, resumed.world);
+    assert_eq!(baseline.world.events, resumed.world.events);
+    assert_eq!(baseline.world.rng, resumed.world.rng);
+    assert_eq!(
+        baseline.world.next_command_sequence,
+        resumed.world.next_command_sequence
+    );
+    assert_eq!(baseline.scheduler, resumed.scheduler);
+
+    // 인과 링크 포함 사건 전체
+    for (a, b) in baseline
+        .world
+        .events
+        .iter()
+        .zip(resumed.world.events.iter())
+    {
+        assert_eq!(a.event_id, b.event_id);
+        assert_eq!(a.caused_by, b.caused_by);
+        assert_eq!(a.influence_links, b.influence_links);
+    }
+
+    // 기존 DemoResult 생성 경로의 최종 compact JSON bytes 동등성
+    let baseline_demo = demo_result_from_final_runtime(1, &baseline);
+    let resumed_demo = demo_result_from_final_runtime(1, &resumed);
+    // run_demo 경로와 동일한 조립 결과가 baseline과 일치하는지 교차 확인
+    let run_demo_result = run_demo(1).expect("run_demo baseline");
+    let ba = baseline_demo.to_compact_json_bytes().expect("json a");
+    let bb = resumed_demo.to_compact_json_bytes().expect("json b");
+    let bc = run_demo_result.to_compact_json_bytes().expect("json c");
+    assert_eq!(ba, bb);
+    assert_eq!(ba, bc);
+
+    // save → load → save
+    let reloaded = load_runtime_from_bytes(&checkpoint_bytes).expect("reload");
+    let resaved = save_runtime_to_bytes(&reloaded).expect("resave");
+    assert_eq!(checkpoint_bytes, resaved);
+}
+
+#[test]
+fn cli_save_check_1_prints_ok() {
+    let before = list_save_check_temp_files(1);
+    let output = run_epoch_lab(&["save-check", "1"]);
+    let after = list_save_check_temp_files(1);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
+    assert!(stdout.contains("seed=1"));
+    assert_save_check_temp_cleaned(1, &before, &after);
+}
+
+#[test]
+fn cli_save_check_2_prints_ok() {
+    let before = list_save_check_temp_files(2);
+    let output = run_epoch_lab(&["save-check", "2"]);
+    let after = list_save_check_temp_files(2);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
+    assert!(stdout.contains("seed=2"));
+    assert_save_check_temp_cleaned(2, &before, &after);
 }
