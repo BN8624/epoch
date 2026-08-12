@@ -1,7 +1,9 @@
 // 결정론·도메인 결과 통합 테스트
 
 use epoch_core::{
-    ContributionClass, DeterministicRng, InformationVisibility, SupportStatus, run_demo,
+    ContributionClass, DeterministicRng, InformationVisibility, SupportStatus,
+    create_demo_checkpoint, load_runtime_from_bytes, run_demo, run_demo_to_runtime,
+    run_demo_via_checkpoint, save_runtime_to_bytes,
 };
 use std::path::PathBuf;
 use std::process::Command;
@@ -253,4 +255,106 @@ fn cli_invalid_args_nonzero_exit() {
         stderr.contains("invalid seed") || stderr.contains("error"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn checkpoint_has_pending_commands_and_zero_draws() {
+    let cp = create_demo_checkpoint(1).expect("checkpoint");
+    assert_eq!(cp.world.world_time, 100);
+    assert_eq!(cp.world.events.len(), 1);
+    assert_eq!(cp.world.events[0].event_type, "player_action_recorded");
+    assert_eq!(cp.scheduler.len(), 3);
+    assert_eq!(cp.world.rng.draws(), 0);
+    assert_eq!(cp.world.player.stance, "house_darian_support");
+    let soren = cp
+        .world
+        .houses
+        .iter()
+        .find(|h| h.id == "house-soren")
+        .unwrap();
+    assert_eq!(soren.support_status, SupportStatus::Declared);
+    assert_eq!(
+        cp.world.information[0].visibility,
+        InformationVisibility::Private
+    );
+}
+
+#[test]
+fn load_preserves_pending_command_count_and_content() {
+    let cp = create_demo_checkpoint(1).expect("checkpoint");
+    let bytes = save_runtime_to_bytes(&cp).expect("save");
+    let loaded = load_runtime_from_bytes(&bytes).expect("load");
+    assert_eq!(loaded.scheduler.len(), cp.scheduler.len());
+    assert_eq!(
+        loaded.scheduler.to_snapshot().queue,
+        cp.scheduler.to_snapshot().queue
+    );
+    assert_eq!(
+        loaded.scheduler.next_sequence(),
+        cp.scheduler.next_sequence()
+    );
+    assert_eq!(loaded.world.rng.draws(), 0);
+    assert_eq!(loaded.world.rng, cp.world.rng);
+}
+
+#[test]
+fn uninterrupted_vs_save_load_resume_full_equality() {
+    let baseline = run_demo_to_runtime(1).expect("baseline");
+    let (resumed, checkpoint_bytes) = run_demo_via_checkpoint(1).expect("resumed");
+
+    assert_eq!(baseline.world, resumed.world);
+    assert_eq!(baseline.world.events, resumed.world.events);
+    assert_eq!(baseline.world.rng, resumed.world.rng);
+    assert_eq!(
+        baseline.world.next_command_sequence,
+        resumed.world.next_command_sequence
+    );
+    assert_eq!(baseline.scheduler, resumed.scheduler);
+
+    // 인과 링크 포함 사건 전체
+    for (a, b) in baseline
+        .world
+        .events
+        .iter()
+        .zip(resumed.world.events.iter())
+    {
+        assert_eq!(a.event_id, b.event_id);
+        assert_eq!(a.caused_by, b.caused_by);
+        assert_eq!(a.influence_links, b.influence_links);
+    }
+
+    let ba = serde_json::to_vec(&baseline.world).expect("json a");
+    let bb = serde_json::to_vec(&resumed.world).expect("json b");
+    assert_eq!(ba, bb);
+
+    // save → load → save
+    let reloaded = load_runtime_from_bytes(&checkpoint_bytes).expect("reload");
+    let resaved = save_runtime_to_bytes(&reloaded).expect("resave");
+    assert_eq!(checkpoint_bytes, resaved);
+}
+
+#[test]
+fn cli_save_check_1_prints_ok() {
+    let output = run_epoch_lab(&["save-check", "1"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
+    assert!(stdout.contains("seed=1"));
+}
+
+#[test]
+fn cli_save_check_2_prints_ok() {
+    let output = run_epoch_lab(&["save-check", "2"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
+    assert!(stdout.contains("seed=2"));
 }

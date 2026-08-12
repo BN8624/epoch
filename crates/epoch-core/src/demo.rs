@@ -1,11 +1,12 @@
 // 고정 계승 분쟁 demo 실행
 
 use crate::command::{
-    Command, CommandEnvelope, EXPOSE_DUPLICATE_PROMISE, SubmitSpec, execute_command, submit_command,
+    Command, CommandEnvelope, EXPOSE_DUPLICATE_PROMISE, SubmitSpec, submit_command,
 };
 use crate::error::CoreError;
 use crate::event::Event;
 use crate::model::WorldState;
+use crate::runtime::RuntimeState;
 use crate::scheduler::{Phase, Scheduler};
 use serde::{Deserialize, Serialize};
 
@@ -32,12 +33,10 @@ impl DemoResult {
     }
 }
 
-/// 고정 demo: 시간 100에서 중복 약속 공개 행동을 실행한다.
-pub fn run_demo(seed: u64) -> Result<DemoResult, CoreError> {
-    let initial_state = WorldState::new_initial(seed);
-    let mut world = initial_state.clone();
+/// 고정 demo 루트 명령이 등록된 RuntimeState를 만든다 (실행 전).
+pub fn create_demo_runtime(seed: u64) -> Result<RuntimeState, CoreError> {
+    let mut world = WorldState::new_initial(seed);
     let mut scheduler = Scheduler::new();
-
     let player_id = world.player.id.clone();
     submit_command(
         &mut world,
@@ -55,23 +54,58 @@ pub fn run_demo(seed: u64) -> Result<DemoResult, CoreError> {
             command_id: "cmd-demo-record-player-action".to_string(),
         },
     )?;
+    Ok(RuntimeState::new(world, scheduler))
+}
+
+/// 시간 100, RecordPlayerAction 완료 직후 checkpoint.
+/// pending 후속 명령 3개, RNG draws == 0, stance/가문/정보 변경 전.
+pub fn create_demo_checkpoint(seed: u64) -> Result<RuntimeState, CoreError> {
+    let mut runtime = create_demo_runtime(seed)?;
+    let stepped = runtime.step()?.ok_or_else(|| {
+        CoreError::InvalidSaveInvariant("demo checkpoint expected a root command".into())
+    })?;
+    debug_assert_eq!(
+        stepped.command_id, "cmd-demo-record-player-action",
+        "checkpoint must follow RecordPlayerAction"
+    );
+    Ok(runtime)
+}
+
+/// 고정 demo: 시간 100에서 중복 약속 공개 행동을 실행한다.
+pub fn run_demo(seed: u64) -> Result<DemoResult, CoreError> {
+    let initial_state = WorldState::new_initial(seed);
+    let mut runtime = create_demo_runtime(seed)?;
 
     // 제출 시점 스냅샷 (실행 전 큐 내용)
-    let submitted_commands: Vec<CommandEnvelope> = scheduler.pending().to_vec();
+    let submitted_commands: Vec<CommandEnvelope> = runtime.scheduler.pending().to_vec();
 
-    while let Some(envelope) = scheduler.pop_next() {
-        execute_command(&mut world, &mut scheduler, &envelope)?;
-    }
+    runtime.run_until_idle()?;
 
-    let events = world.events.clone();
+    let events = runtime.world.events.clone();
     Ok(DemoResult {
         schema_version: 1,
         seed,
         initial_state,
         submitted_commands,
-        final_state: world,
+        final_state: runtime.world,
         events,
     })
+}
+
+/// uninterrupted 경로 최종 RuntimeState (큐 비움).
+pub fn run_demo_to_runtime(seed: u64) -> Result<RuntimeState, CoreError> {
+    let mut runtime = create_demo_runtime(seed)?;
+    runtime.run_until_idle()?;
+    Ok(runtime)
+}
+
+/// checkpoint 저장 → 로드 → 재개 경로의 최종 RuntimeState.
+pub fn run_demo_via_checkpoint(seed: u64) -> Result<(RuntimeState, Vec<u8>), CoreError> {
+    let checkpoint = create_demo_checkpoint(seed)?;
+    let bytes = crate::save::save_runtime_to_bytes(&checkpoint)?;
+    let mut resumed = crate::save::load_runtime_from_bytes(&bytes)?;
+    resumed.run_until_idle()?;
+    Ok((resumed, bytes))
 }
 
 #[cfg(test)]
@@ -79,6 +113,7 @@ mod tests {
     use super::*;
     use crate::event::ContributionClass;
     use crate::model::{InformationVisibility, SupportStatus};
+    use crate::save::{load_runtime_from_bytes, save_runtime_to_bytes};
 
     #[test]
     fn demo_changes_stance_and_soren_support() {
@@ -243,5 +278,50 @@ mod tests {
         for seed in [0u64, 1, 2, 42, 999] {
             run_demo(seed).expect("demo should succeed");
         }
+    }
+
+    #[test]
+    fn uninterrupted_equals_checkpoint_resume() {
+        let baseline = run_demo_to_runtime(1).expect("baseline");
+        let (resumed, checkpoint_bytes) = run_demo_via_checkpoint(1).expect("resumed");
+
+        assert_eq!(baseline.world, resumed.world);
+        assert_eq!(baseline.world.events, resumed.world.events);
+        assert_eq!(baseline.world.rng, resumed.world.rng);
+        assert_eq!(baseline.scheduler, resumed.scheduler);
+        assert_eq!(
+            baseline.world.next_command_sequence,
+            resumed.world.next_command_sequence
+        );
+
+        // save → load → save byte 동일
+        let re_saved = save_runtime_to_bytes(
+            &load_runtime_from_bytes(&checkpoint_bytes).expect("reload checkpoint"),
+        )
+        .expect("re-save");
+        assert_eq!(checkpoint_bytes, re_saved);
+
+        // 최종 compact 비교용: world 전체 직렬화
+        let ba = serde_json::to_vec(&baseline.world).expect("json a");
+        let bb = serde_json::to_vec(&resumed.world).expect("json b");
+        assert_eq!(ba, bb);
+    }
+
+    #[test]
+    fn checkpoint_pending_commands_match_after_load() {
+        let checkpoint = create_demo_checkpoint(1).expect("checkpoint");
+        assert_eq!(checkpoint.scheduler.len(), 3);
+        assert_eq!(checkpoint.world.rng.draws(), 0);
+        let bytes = save_runtime_to_bytes(&checkpoint).expect("save");
+        let loaded = load_runtime_from_bytes(&bytes).expect("load");
+        assert_eq!(loaded.scheduler.len(), 3);
+        assert_eq!(
+            loaded.scheduler.pending().to_vec(),
+            checkpoint.scheduler.to_snapshot().queue
+        );
+        assert_eq!(
+            loaded.scheduler.next_sequence(),
+            checkpoint.scheduler.next_sequence()
+        );
     }
 }
