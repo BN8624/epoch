@@ -66,8 +66,12 @@ pub fn generate_population(world: &WorldSkeleton) -> Result<PopulationSkeleton, 
     let mut persons = Vec::with_capacity(PERSON_COUNT);
     let mut ruler_links = Vec::with_capacity(world.rulers.len());
 
-    // realm 순서 고정: world.realms 순서 (M1.1은 realm-01..06 순)
-    for (realm_index, realm) in world.realms.iter().enumerate() {
+    // house ID 배정은 world.realms 벡터 순서가 아니라 realm ID 정규 순서 기준
+    // (realm-01 → house-01..03, realm-02 → house-04..06, …).
+    let mut realms_by_id: Vec<&crate::world::Realm> = world.realms.iter().collect();
+    realms_by_id.sort_by(|a, b| a.id.cmp(&b.id));
+
+    for (realm_index, realm) in realms_by_id.iter().enumerate() {
         let seats = select_house_seats(realm)?;
         let ruler = world
             .rulers
@@ -94,7 +98,7 @@ pub fn generate_population(world: &WorldSkeleton) -> Result<PopulationSkeleton, 
             // head = current[0] = member 2
             let head_person_id = member_ids[2].clone();
 
-            // 가문 내 이름 배정 (중복 금지). ruling house head는 ruler name 우선.
+            // 가문 내 이름 배정 (중복 금지). ruling house head는 ruler name 우선 예약.
             let is_ruling_house = local_house == 0;
             let names =
                 assign_house_names(house_index, population_seed, is_ruling_house, &ruler.name)?;
@@ -131,7 +135,7 @@ pub fn generate_population(world: &WorldSkeleton) -> Result<PopulationSkeleton, 
         }
     }
 
-    // 안정 순서: house-01..18, person-001..144, ruler link는 realm 순
+    // 안정 순서: house-01..18 (realm ID 정규 순), person-001..144
     // member_ids는 이미 person ID 순
 
     let population = PopulationSkeleton {
@@ -218,7 +222,8 @@ pub fn validate_population(
     let ruler_by_id: BTreeMap<String, &crate::world::Ruler> =
         world.rulers.iter().map(|r| (r.id.clone(), r)).collect();
 
-    // House uniqueness
+    // House uniqueness + exact ID set house-01..18
+    let expected_house_ids: BTreeSet<String> = (0..HOUSE_COUNT).map(house_id_at).collect();
     let mut house_ids = BTreeSet::new();
     let mut house_names = BTreeSet::new();
     let mut house_by_id: BTreeMap<String, &House> = BTreeMap::new();
@@ -292,8 +297,49 @@ pub fn validate_population(
                 house.id, house.head_person_id
             )));
         }
+        // head = current[0] = member_ids[2]
+        if house.head_person_id != house.member_ids[2] {
+            return Err(CoreError::InvalidPopulation(format!(
+                "house {} head {} != member_ids[2] {}",
+                house.id, house.head_person_id, house.member_ids[2]
+            )));
+        }
 
         house_by_id.insert(house.id.clone(), house);
+    }
+
+    if house_ids != expected_house_ids {
+        return Err(CoreError::InvalidPopulation(format!(
+            "house id set mismatch: got {house_ids:?} expected house-01..house-18"
+        )));
+    }
+
+    // 국가별 연속 house ID 배정: realm ID 정규 순서 기준
+    // realm-01 → house-01..03, realm-02 → house-04..06, …
+    let mut sorted_realm_ids: Vec<String> = world.realms.iter().map(|r| r.id.clone()).collect();
+    sorted_realm_ids.sort();
+    for (realm_index, realm_id) in sorted_realm_ids.iter().enumerate() {
+        let mut realm_houses: Vec<&House> = population
+            .houses
+            .iter()
+            .filter(|h| h.realm_id == *realm_id)
+            .collect();
+        realm_houses.sort_by(|a, b| a.id.cmp(&b.id));
+        if realm_houses.len() != HOUSES_PER_REALM {
+            return Err(CoreError::InvalidPopulation(format!(
+                "realm {realm_id} has {} houses (expected {HOUSES_PER_REALM})",
+                realm_houses.len()
+            )));
+        }
+        for (local, h) in realm_houses.iter().enumerate() {
+            let expected_id = house_id_at(realm_index * HOUSES_PER_REALM + local);
+            if h.id != expected_id {
+                return Err(CoreError::InvalidPopulation(format!(
+                    "realm {realm_id} local house {local} id {} != expected {expected_id}",
+                    h.id
+                )));
+            }
+        }
     }
 
     for realm in &world.realms {
@@ -398,19 +444,27 @@ pub fn validate_population(
         }
     }
 
-    // House generation composition + head Current + in-house name uniqueness
+    // House generation composition + fixed member-slot placement + head Current
+    // member 0,1 → Elder; 2,3,4 → Current; 5,6,7 → Young; head == member_ids[2]
     for house in &population.houses {
         let mut e = 0usize;
         let mut c = 0usize;
         let mut y = 0usize;
         let mut names = BTreeSet::new();
-        for mid in &house.member_ids {
+        for (m, mid) in house.member_ids.iter().enumerate() {
             let p = person_by_id.get(mid).ok_or_else(|| {
                 CoreError::InvalidPopulation(format!(
                     "house {} member {mid} missing person record",
                     house.id
                 ))
             })?;
+            let expected_gen = generation_for_member(m);
+            if p.generation != expected_gen {
+                return Err(CoreError::InvalidPopulation(format!(
+                    "house {} member_ids[{m}] {} generation {:?} != expected {:?}",
+                    house.id, mid, p.generation, expected_gen
+                )));
+            }
             match p.generation {
                 GenerationBand::Elder => e += 1,
                 GenerationBand::Current => c += 1,
@@ -670,7 +724,7 @@ fn parent_ids_for_member(member_index: usize, member_ids: &[String]) -> Vec<Stri
     }
 }
 
-/// 가문 8명 display name 배정. ruling house의 current[0](member 2)은 ruler_name 우선.
+/// 가문 8명 display name 배정. ruling house head(member 2)는 ruler_name을 먼저 예약한다.
 fn assign_house_names(
     house_index: usize,
     population_seed: u64,
@@ -681,10 +735,14 @@ fn assign_house_names(
     let mut names: [String; PERSONS_PER_HOUSE] = std::array::from_fn(|_| String::new());
     let mut used = BTreeSet::new();
 
+    // ruling house: head 이름을 먼저 예약해 다른 member가 동일 이름을 고르지 못하게 한다.
+    if is_ruling_house {
+        names[2] = ruler_name.to_string();
+        used.insert(ruler_name.to_string());
+    }
+
     for (m, slot) in names.iter_mut().enumerate() {
         if is_ruling_house && m == 2 {
-            *slot = ruler_name.to_string();
-            used.insert(ruler_name.to_string());
             continue;
         }
         // deterministic start from house/member/seed; walk pool until unique in house
@@ -710,7 +768,6 @@ fn assign_house_names(
         *slot = name;
     }
 
-    // ruling house head가 ruler name을 쓰므로, 다른 member가 우연히 같은 이름을 골랐다면 이미 used로 차단됨
     Ok(names)
 }
 
@@ -728,6 +785,7 @@ fn fisher_yates_shuffle(items: &mut [String], rng: &mut DeterministicRng) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::population::generation_for_member;
 
     #[test]
     fn generate_fixed_counts_seed_1() {
@@ -769,5 +827,119 @@ mod tests {
             d1.world.to_compact_json_bytes().unwrap()
         );
         assert_eq!(w1, d1.world);
+    }
+
+    /// realm 벡터 순서만 뒤집어 도 house-01..18이 realm ID 정규 순으로 배정된다.
+    #[test]
+    fn house_ids_follow_realm_id_order_not_vector_order() {
+        let mut world = generate_world(1).expect("world");
+        world.realms.reverse();
+        validate_world(&world).expect("reordered realms still valid");
+
+        let pop = generate_population(&world).expect("population");
+        let mut by_realm: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for h in &pop.houses {
+            by_realm
+                .entry(h.realm_id.clone())
+                .or_default()
+                .push(h.id.clone());
+        }
+        for ids in by_realm.values_mut() {
+            ids.sort();
+        }
+        assert_eq!(
+            by_realm.get("realm-01").cloned().unwrap_or_default(),
+            vec![
+                "house-01".to_string(),
+                "house-02".to_string(),
+                "house-03".to_string()
+            ]
+        );
+        assert_eq!(
+            by_realm.get("realm-02").cloned().unwrap_or_default(),
+            vec![
+                "house-04".to_string(),
+                "house-05".to_string(),
+                "house-06".to_string()
+            ]
+        );
+        assert_eq!(
+            by_realm.get("realm-06").cloned().unwrap_or_default(),
+            vec![
+                "house-16".to_string(),
+                "house-17".to_string(),
+                "house-18".to_string()
+            ]
+        );
+        validate_population(&world, &pop).expect("validate reordered");
+    }
+
+    /// ruling house head 이름을 먼저 예약하면 fixture와 충돌해도 가문 내 이름 중복이 없다.
+    #[test]
+    fn assign_house_names_reserves_ruler_name_first() {
+        // GIVEN_NAME_POOL 첫 이름과 동일한 ruler 이름 → member 0 시작 후보와 충돌 가능
+        let ruler_name = GIVEN_NAME_POOL[0];
+        let names = assign_house_names(0, 1, true, ruler_name).expect("names");
+        assert_eq!(names[2], ruler_name);
+        let set: BTreeSet<&str> = names.iter().map(String::as_str).collect();
+        assert_eq!(
+            set.len(),
+            PERSONS_PER_HOUSE,
+            "in-house names must be unique"
+        );
+    }
+
+    /// member 슬롯별 세대와 head==member_ids[2] 고정 규칙을 검증한다.
+    #[test]
+    fn member_slot_generations_and_head_is_member_2() {
+        let d = generate_dynastic_world(1).expect("dynastic");
+        let by_id: BTreeMap<_, _> = d
+            .population
+            .persons
+            .iter()
+            .map(|p| (p.id.as_str(), p))
+            .collect();
+        for house in &d.population.houses {
+            assert_eq!(house.head_person_id, house.member_ids[2]);
+            for (m, mid) in house.member_ids.iter().enumerate() {
+                assert_eq!(
+                    by_id[mid.as_str()].generation,
+                    generation_for_member(m),
+                    "house {} member {m}",
+                    house.id
+                );
+            }
+        }
+    }
+
+    /// validate_population이 잘못된 member 슬롯 세대를 거부한다.
+    #[test]
+    fn validate_rejects_wrong_member_slot_generation() {
+        let mut d = generate_dynastic_world(1).expect("dynastic");
+        // house-01 member 0을 Current로 바꿔 슬롯 규칙 위반
+        let mid0 = d.population.houses[0].member_ids[0].clone();
+        let p = d
+            .population
+            .persons
+            .iter_mut()
+            .find(|p| p.id == mid0)
+            .expect("person");
+        p.generation = GenerationBand::Current;
+        // 세대 총계를 맞추기 위해 member 2를 Elder로 (슬롯 규칙은 여전히 깨짐)
+        let mid2 = d.population.houses[0].member_ids[2].clone();
+        let p2 = d
+            .population
+            .persons
+            .iter_mut()
+            .find(|p| p.id == mid2)
+            .expect("person");
+        p2.generation = GenerationBand::Elder;
+
+        let err = validate_population(&d.world, &d.population).expect_err("must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("member_ids[") || msg.contains("generation"),
+            "unexpected err: {msg}"
+        );
     }
 }

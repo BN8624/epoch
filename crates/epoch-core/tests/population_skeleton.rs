@@ -76,15 +76,25 @@ fn house_generation_composition_and_head_current() {
         .collect();
     for house in &d.population.houses {
         assert_eq!(house.member_ids.len(), 8);
+        // 고정 슬롯: 0,1 Elder / 2,3,4 Current / 5,6,7 Young; head == member 2
+        assert_eq!(house.head_person_id, house.member_ids[2]);
         let mut e = 0;
         let mut c = 0;
         let mut y = 0;
-        for mid in &house.member_ids {
-            match by_id[mid.as_str()].generation {
+        for (m, mid) in house.member_ids.iter().enumerate() {
+            let band = by_id[mid.as_str()].generation;
+            match band {
                 GenerationBand::Elder => e += 1,
                 GenerationBand::Current => c += 1,
                 GenerationBand::Young => y += 1,
             }
+            let expected = match m {
+                0 | 1 => GenerationBand::Elder,
+                2..=4 => GenerationBand::Current,
+                5..=7 => GenerationBand::Young,
+                _ => unreachable!(),
+            };
+            assert_eq!(band, expected, "house {} member {m}", house.id);
         }
         assert_eq!((e, c, y), (2, 3, 3), "house {}", house.id);
         let head = by_id[house.head_person_id.as_str()];
@@ -92,6 +102,29 @@ fn house_generation_composition_and_head_current() {
         assert_eq!(head.home_territory_id, house.seat_territory_id);
         assert_eq!(head.realm_id, house.realm_id);
     }
+}
+
+#[test]
+fn house_ids_stable_under_realm_vector_reorder() {
+    let mut world = generate_world(1).expect("world");
+    world.realms.reverse();
+    validate_world(&world).expect("world ok");
+    let pop = epoch_core::generate_population(&world).expect("pop");
+    let mut sorted_realm_ids: Vec<_> = world.realms.iter().map(|r| r.id.as_str()).collect();
+    sorted_realm_ids.sort();
+    for (realm_index, realm_id) in sorted_realm_ids.iter().enumerate() {
+        let mut houses: Vec<_> = pop
+            .houses
+            .iter()
+            .filter(|h| h.realm_id == *realm_id)
+            .collect();
+        houses.sort_by(|a, b| a.id.cmp(&b.id));
+        for (local, h) in houses.iter().enumerate() {
+            let expected = format!("house-{:02}", realm_index * 3 + local + 1);
+            assert_eq!(h.id, expected, "realm {realm_id} local {local}");
+        }
+    }
+    validate_population(&world, &pop).expect("invariants");
 }
 
 #[test]
