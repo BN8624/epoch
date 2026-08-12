@@ -197,6 +197,8 @@ fn cmd_save_check(args: &[String]) -> ExitCode {
     // 4–5. 실제 임시 파일에 기록 후 재읽기
     let tmp_path = temp_save_path(seed);
     if let Err(e) = fs::write(&tmp_path, &checkpoint_bytes) {
+        // 부분 기록·생성 파일이 남을 수 있으므로 최선 노력으로 정리한다.
+        let _ = fs::remove_file(&tmp_path);
         eprintln!("error: write temp save failed: {e}");
         return ExitCode::from(1);
     }

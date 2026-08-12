@@ -1,11 +1,12 @@
 // 결정론·도메인 결과 통합 테스트
 
 use epoch_core::{
-    ContributionClass, DeterministicRng, InformationVisibility, SupportStatus,
-    create_demo_checkpoint, load_runtime_from_bytes, run_demo, run_demo_to_runtime,
-    run_demo_via_checkpoint, save_runtime_to_bytes,
+    ContributionClass, DemoResult, DeterministicRng, InformationVisibility, SupportStatus,
+    WorldState, create_demo_checkpoint, create_demo_runtime, load_runtime_from_bytes, run_demo,
+    run_demo_to_runtime, run_demo_via_checkpoint, save_runtime_to_bytes,
 };
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// 현재 소스에서 빌드된 바이너리만 검사하도록 항상 cargo run을 사용한다.
@@ -19,6 +20,56 @@ fn run_epoch_lab(args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .expect("cargo run -p epoch-lab")
+}
+
+/// 시스템 temp에 남아 있는 epoch-lab save-check 임시 파일 목록 (seed별).
+fn list_save_check_temp_files(seed: u64) -> Vec<PathBuf> {
+    let temp = std::env::temp_dir();
+    let suffix = format!("-{seed}.json");
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(&temp) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("epoch-save-check-") && name.ends_with(&suffix) {
+            out.push(entry.path());
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 최종 RuntimeState를 기존 run_demo와 동일한 DemoResult 조립 경로로 변환한다.
+fn demo_result_from_final_runtime(
+    seed: u64,
+    final_runtime: &epoch_core::RuntimeState,
+) -> DemoResult {
+    let initial_state = WorldState::new_initial(seed);
+    let setup = create_demo_runtime(seed).expect("create_demo_runtime for DemoResult path");
+    let submitted_commands = setup.scheduler.pending().to_vec();
+    let events = final_runtime.world.events.clone();
+    DemoResult {
+        schema_version: 1,
+        seed,
+        initial_state,
+        submitted_commands,
+        final_state: final_runtime.world.clone(),
+        events,
+    }
+}
+
+fn assert_save_check_temp_cleaned(_seed: u64, before: &[PathBuf], after: &[PathBuf]) {
+    let leftovers: Vec<&Path> = after
+        .iter()
+        .filter(|p| !before.contains(p))
+        .map(PathBuf::as_path)
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "save-check left temp files after success: {leftovers:?}"
+    );
 }
 
 #[test]
@@ -323,9 +374,16 @@ fn uninterrupted_vs_save_load_resume_full_equality() {
         assert_eq!(a.influence_links, b.influence_links);
     }
 
-    let ba = serde_json::to_vec(&baseline.world).expect("json a");
-    let bb = serde_json::to_vec(&resumed.world).expect("json b");
+    // 기존 DemoResult 생성 경로의 최종 compact JSON bytes 동등성
+    let baseline_demo = demo_result_from_final_runtime(1, &baseline);
+    let resumed_demo = demo_result_from_final_runtime(1, &resumed);
+    // run_demo 경로와 동일한 조립 결과가 baseline과 일치하는지 교차 확인
+    let run_demo_result = run_demo(1).expect("run_demo baseline");
+    let ba = baseline_demo.to_compact_json_bytes().expect("json a");
+    let bb = resumed_demo.to_compact_json_bytes().expect("json b");
+    let bc = run_demo_result.to_compact_json_bytes().expect("json c");
     assert_eq!(ba, bb);
+    assert_eq!(ba, bc);
 
     // save → load → save
     let reloaded = load_runtime_from_bytes(&checkpoint_bytes).expect("reload");
@@ -335,7 +393,9 @@ fn uninterrupted_vs_save_load_resume_full_equality() {
 
 #[test]
 fn cli_save_check_1_prints_ok() {
+    let before = list_save_check_temp_files(1);
     let output = run_epoch_lab(&["save-check", "1"]);
+    let after = list_save_check_temp_files(1);
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -344,11 +404,14 @@ fn cli_save_check_1_prints_ok() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
     assert!(stdout.contains("seed=1"));
+    assert_save_check_temp_cleaned(1, &before, &after);
 }
 
 #[test]
 fn cli_save_check_2_prints_ok() {
+    let before = list_save_check_temp_files(2);
     let output = run_epoch_lab(&["save-check", "2"]);
+    let after = list_save_check_temp_files(2);
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -357,4 +420,5 @@ fn cli_save_check_2_prints_ok() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
     assert!(stdout.contains("seed=2"));
+    assert_save_check_temp_cleaned(2, &before, &after);
 }
