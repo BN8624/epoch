@@ -44,6 +44,14 @@ pub enum CoreError {
         action_code: String,
     },
     Serialization(String),
+    /// JSON 파싱 실패 또는 필수 필드 누락 등 저장본 디코드 오류.
+    SaveDecode(String),
+    /// 지원하지 않는 save schema_version.
+    UnsupportedSaveSchema {
+        version: u32,
+    },
+    /// 로드 직후 불변식 위반 (부분 상태 반환 금지).
+    InvalidSaveInvariant(String),
 }
 
 impl fmt::Display for CoreError {
@@ -89,6 +97,13 @@ impl fmt::Display for CoreError {
                 write!(f, "invalid action code: {action_code}")
             }
             CoreError::Serialization(msg) => write!(f, "serialization error: {msg}"),
+            CoreError::SaveDecode(msg) => write!(f, "save decode error: {msg}"),
+            CoreError::UnsupportedSaveSchema { version } => {
+                write!(f, "unsupported save schema_version: {version}")
+            }
+            CoreError::InvalidSaveInvariant(msg) => {
+                write!(f, "invalid save invariant: {msg}")
+            }
         }
     }
 }
