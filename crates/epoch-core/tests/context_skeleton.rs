@@ -695,50 +695,82 @@ fn cli_population_check_1_2_exact_regression() {
 
 #[test]
 fn cli_world_check_1_2_exact_regression() {
-    for seed in ["1", "2"] {
-        let output = run_epoch_lab(&["world-check", seed]);
-        assert!(
-            output.status.success(),
-            "seed={seed} stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("WORLD_OK"), "seed={seed} stdout: {stdout}");
-        assert!(
-            stdout.contains(&format!("seed={seed}")),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(stdout.contains("realms=6"), "seed={seed} stdout: {stdout}");
-        assert!(
-            stdout.contains("territories=36"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(stdout.contains("rulers=6"), "seed={seed} stdout: {stdout}");
-    }
+    let out1 = run_epoch_lab(&["world-check", "1"]);
+    assert!(
+        out1.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    let s1 = String::from_utf8_lossy(&out1.stdout);
+    assert!(
+        s1.contains(
+            "WORLD_OK seed=1 realms=6 territories=36 rulers=6 template=vertical bytes=6234"
+        ),
+        "stdout: {s1}"
+    );
+
+    let out2 = run_epoch_lab(&["world-check", "2"]);
+    assert!(
+        out2.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    let s2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(
+        s2.contains(
+            "WORLD_OK seed=2 realms=6 territories=36 rulers=6 template=blocks_2x3 bytes=6233"
+        ),
+        "stdout: {s2}"
+    );
 }
 
 #[test]
 fn cli_m0_replay_and_save_check_exact_regression() {
-    let replay = run_epoch_lab(&["replay-check", "1"]);
+    let replay1 = run_epoch_lab(&["replay-check", "1"]);
     assert!(
-        replay.status.success(),
+        replay1.status.success(),
         "stderr: {}",
-        String::from_utf8_lossy(&replay.stderr)
+        String::from_utf8_lossy(&replay1.stderr)
     );
-    let replay_out = String::from_utf8_lossy(&replay.stdout);
+    let r1 = String::from_utf8_lossy(&replay1.stdout);
     assert!(
-        replay_out.contains("DETERMINISM_OK"),
-        "stdout: {replay_out}"
+        r1.contains("DETERMINISM_OK seed=1 events=5 bytes=7353"),
+        "stdout: {r1}"
     );
-    assert!(replay_out.contains("seed=1"), "stdout: {replay_out}");
 
-    let save = run_epoch_lab(&["save-check", "1"]);
+    let replay2 = run_epoch_lab(&["replay-check", "2"]);
     assert!(
-        save.status.success(),
+        replay2.status.success(),
         "stderr: {}",
-        String::from_utf8_lossy(&save.stderr)
+        String::from_utf8_lossy(&replay2.stderr)
     );
-    let save_out = String::from_utf8_lossy(&save.stdout);
-    assert!(save_out.contains("SAVE_LOAD_OK"), "stdout: {save_out}");
-    assert!(save_out.contains("seed=1"), "stdout: {save_out}");
+    let r2 = String::from_utf8_lossy(&replay2.stdout);
+    assert!(
+        r2.contains("DETERMINISM_OK seed=2 events=5 bytes=7392"),
+        "stdout: {r2}"
+    );
+
+    let save1 = run_epoch_lab(&["save-check", "1"]);
+    assert!(
+        save1.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&save1.stderr)
+    );
+    let s1 = String::from_utf8_lossy(&save1.stdout);
+    assert!(
+        s1.contains("SAVE_LOAD_OK seed=1 checkpoint_bytes=2167 events=5"),
+        "stdout: {s1}"
+    );
+
+    let save2 = run_epoch_lab(&["save-check", "2"]);
+    assert!(
+        save2.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&save2.stderr)
+    );
+    let s2 = String::from_utf8_lossy(&save2.stdout);
+    assert!(
+        s2.contains("SAVE_LOAD_OK seed=2 checkpoint_bytes=2167 events=5"),
+        "stdout: {s2}"
+    );
 }
