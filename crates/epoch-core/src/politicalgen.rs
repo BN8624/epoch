@@ -275,6 +275,18 @@ pub fn validate_political_roster(
     dynastic: &DynasticWorld,
     roster: &PoliticalRoster,
 ) -> Result<(), CoreError> {
+    // 깨진 DynasticWorld는 panic 대신 CoreError로 fail closed.
+    validate_world(&dynastic.world).map_err(|e| match e {
+        CoreError::InvalidWorld(msg) => CoreError::InvalidPolitical(format!("world: {msg}")),
+        other => other,
+    })?;
+    validate_population(&dynastic.world, &dynastic.population).map_err(|e| match e {
+        CoreError::InvalidPopulation(msg) => {
+            CoreError::InvalidPolitical(format!("population: {msg}"))
+        }
+        other => other,
+    })?;
+
     let pop = &dynastic.population;
     let person_by_id: BTreeMap<&str, &crate::population::Person> =
         pop.persons.iter().map(|p| (p.id.as_str(), p)).collect();
@@ -495,7 +507,12 @@ pub fn validate_political_roster(
                 let houses = houses_by_realm.get(&actor.realm_id).ok_or_else(|| {
                     CoreError::InvalidPolitical(format!("no houses for realm {}", actor.realm_id))
                 })?;
-                let ruling = houses[0];
+                let ruling = houses.first().ok_or_else(|| {
+                    CoreError::InvalidPolitical(format!(
+                        "no ruling house for realm {}",
+                        actor.realm_id
+                    ))
+                })?;
                 if ruling.member_ids.get(3).map(|s| s.as_str()) != Some(actor.person_id.as_str()) {
                     return Err(CoreError::InvalidPolitical(format!(
                         "primary RulingHouseCurrent {} != ruling house {} member_ids[3]",
@@ -562,7 +579,12 @@ pub fn validate_political_roster(
                 )));
             }
         }
-        let additional = &houses[0].member_ids[3];
+        let ruling = houses
+            .first()
+            .ok_or_else(|| CoreError::InvalidPolitical("empty house list for realm".to_string()))?;
+        let additional = ruling.member_ids.get(3).ok_or_else(|| {
+            CoreError::InvalidPolitical(format!("ruling house {} missing member_ids[3]", ruling.id))
+        })?;
         if !active_ids.contains(additional) {
             return Err(CoreError::InvalidPolitical(format!(
                 "ruling house member_ids[3] {additional} not active"

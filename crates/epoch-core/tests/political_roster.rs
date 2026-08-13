@@ -273,6 +273,13 @@ fn invalid_roster_rejected() {
     roster2.supporting_person_ids[0] = roster2.supporting_person_ids[1].clone();
     let err2 = validate_political_roster(&d, &roster2).expect_err("must fail dup");
     assert!(matches!(err2, CoreError::InvalidPolitical(_)));
+
+    // malformed dynastic (short member_ids) must fail closed, not panic
+    let mut d_bad = generate_dynastic_world(1).expect("dynastic bad");
+    let roster_ok = derive_political_roster(&d_bad).expect("roster ok");
+    d_bad.population.houses[0].member_ids.truncate(1);
+    let err3 = validate_political_roster(&d_bad, &roster_ok).expect_err("must not panic");
+    assert!(matches!(err3, CoreError::InvalidPolitical(_)));
 }
 
 #[test]
