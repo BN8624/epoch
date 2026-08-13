@@ -5,6 +5,8 @@ pub mod demo;
 pub mod error;
 pub mod event;
 pub mod model;
+pub mod political;
+pub mod politicalgen;
 pub mod population;
 pub mod populationgen;
 pub mod rng;
@@ -25,6 +27,13 @@ pub use error::CoreError;
 pub use event::{ContributionClass, Event, InfluenceLink, RandomDraw, StateChange};
 pub use model::{
     Candidate, House, Information, InformationVisibility, Player, SupportStatus, WorldState,
+};
+pub use political::{
+    ACTIVE_ACTOR_COUNT, ActivationReason, ActiveActor, ActiveRole, POLITICAL_WORLD_SCHEMA_VERSION,
+    PoliticalRoster, PoliticalWorld, SUPPORTING_PERSON_COUNT,
+};
+pub use politicalgen::{
+    derive_political_roster, generate_political_world, validate_political_roster,
 };
 pub use population::{
     DYNASTIC_WORLD_SCHEMA_VERSION, DynasticWorld, GenerationBand, HOUSE_COUNT, PERSON_COUNT,

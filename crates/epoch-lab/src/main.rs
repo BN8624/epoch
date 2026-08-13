@@ -1,9 +1,10 @@
 // EPOCH lab CLI — demo 및 결정론 재생·저장 검사
 
 use epoch_core::{
-    GenerationBand, create_demo_checkpoint, generate_dynastic_world, generate_world,
-    load_runtime_from_bytes, run_demo, run_demo_to_runtime, save_runtime_to_bytes,
-    validate_population, validate_world,
+    ActiveRole, GenerationBand, create_demo_checkpoint, generate_dynastic_world,
+    generate_political_world, generate_world, load_runtime_from_bytes, run_demo,
+    run_demo_to_runtime, save_runtime_to_bytes, validate_political_roster, validate_population,
+    validate_world,
 };
 use std::env;
 use std::fs;
@@ -30,6 +31,8 @@ fn main() -> ExitCode {
         "world-check" => cmd_world_check(&args),
         "population" => cmd_population(&args),
         "population-check" => cmd_population_check(&args),
+        "actors" => cmd_actors(&args),
+        "actors-check" => cmd_actors_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -52,6 +55,8 @@ Usage:
   cargo run -p epoch-lab -- world-check <seed>
   cargo run -p epoch-lab -- population <seed>
   cargo run -p epoch-lab -- population-check <seed>
+  cargo run -p epoch-lab -- actors <seed>
+  cargo run -p epoch-lab -- actors-check <seed>
 
 Commands:
   help              Show this help
@@ -62,6 +67,8 @@ Commands:
   world-check       Generate twice, verify determinism and world invariants
   population        Generate dynastic world (world + population) and print pretty JSON
   population-check  Generate twice, verify determinism and population invariants
+  actors            Generate political world and print pretty JSON
+  actors-check      Generate twice, verify determinism and political roster invariants
 "
     );
 }
@@ -78,6 +85,8 @@ Usage:
   cargo run -p epoch-lab -- world-check <seed>
   cargo run -p epoch-lab -- population <seed>
   cargo run -p epoch-lab -- population-check <seed>
+  cargo run -p epoch-lab -- actors <seed>
+  cargo run -p epoch-lab -- actors-check <seed>
 "
     );
 }
@@ -295,6 +304,121 @@ fn cmd_population_check(args: &[String]) -> ExitCode {
         a.population.houses.len(),
         a.population.persons.len(),
         a.population.ruler_links.len(),
+        bytes_a.len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_actors(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_political_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize political world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: political world generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_actors_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_political_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_political_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first political world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second political world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_world(&a.dynastic.world) {
+        eprintln!("error: world invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_population(&a.dynastic.world, &a.dynastic.population) {
+        eprintln!("error: population invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_political_roster(&a.dynastic, &a.roster) {
+        eprintln!("error: political roster invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    let mut rulers = 0usize;
+    let mut house_heads = 0usize;
+    let mut ruling_house_current = 0usize;
+    for actor in &a.roster.active_actors {
+        match actor.primary_role {
+            ActiveRole::Ruler => rulers += 1,
+            ActiveRole::HouseHead => house_heads += 1,
+            ActiveRole::RulingHouseCurrent => ruling_house_current += 1,
+        }
+    }
+
+    println!(
+        "ACTORS_OK seed={seed} active={} supporting={} rulers={rulers} house_heads={house_heads} ruling_house_current={ruling_house_current} realms={} bytes={}",
+        a.roster.active_actors.len(),
+        a.roster.supporting_person_ids.len(),
+        a.dynastic.world.realms.len(),
         bytes_a.len()
     );
     ExitCode::SUCCESS
