@@ -957,6 +957,58 @@ pub fn validate_initial_context(
         }
     }
 
+    // Cross-realm must be exactly the ruling-house ring:
+    // realm-01→02→03→04→05→06→01 (each Cooperative).
+    let mut realms_sorted: Vec<_> = political.dynastic.world.realms.iter().collect();
+    realms_sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut ruling_ids: Vec<&str> = Vec::with_capacity(WORLD_REALM_COUNT);
+    for realm in &realms_sorted {
+        let houses = houses_by_realm.get(realm.id.as_str()).ok_or_else(|| {
+            CoreError::InvalidContext(format!("missing houses for realm {}", realm.id))
+        })?;
+        let ruling = houses.first().ok_or_else(|| {
+            CoreError::InvalidContext(format!("missing ruling house for {}", realm.id))
+        })?;
+        ruling_ids.push(ruling.id.as_str());
+    }
+    if ruling_ids.len() != WORLD_REALM_COUNT {
+        return Err(CoreError::InvalidContext(format!(
+            "ruling house ring length {} != {WORLD_REALM_COUNT}",
+            ruling_ids.len()
+        )));
+    }
+    let mut expected_ring: BTreeSet<(String, String)> = BTreeSet::new();
+    let n = ruling_ids.len();
+    for i in 0..n {
+        let a = ruling_ids.get(i).copied().ok_or_else(|| {
+            CoreError::InvalidContext(format!("ruling house ring index {i} missing"))
+        })?;
+        let b = ruling_ids.get((i + 1) % n).copied().ok_or_else(|| {
+            CoreError::InvalidContext(format!("ruling house ring neighbor of {i} missing"))
+        })?;
+        let (ca, cb) = canonicalize_pair(a, b);
+        expected_ring.insert((ca, cb));
+    }
+    let mut actual_cross: BTreeSet<(String, String)> = BTreeSet::new();
+    for rel in &context.relations {
+        let ra = *house_realm.get(rel.house_a_id.as_str()).unwrap_or(&"");
+        let rb = *house_realm.get(rel.house_b_id.as_str()).unwrap_or(&"");
+        if ra != rb {
+            if rel.kind != HouseRelationKind::Cooperative {
+                return Err(CoreError::InvalidContext(format!(
+                    "cross-realm ring pair {}-{} must be Cooperative",
+                    rel.house_a_id, rel.house_b_id
+                )));
+            }
+            actual_cross.insert((rel.house_a_id.clone(), rel.house_b_id.clone()));
+        }
+    }
+    if actual_cross != expected_ring {
+        return Err(CoreError::InvalidContext(format!(
+            "cross-realm relations must match ruling house ring pairs; expected {expected_ring:?} got {actual_cross:?}"
+        )));
+    }
+
     // Promises
     if context.promises.len() != PROMISE_COUNT {
         return Err(CoreError::InvalidContext(format!(
@@ -1290,6 +1342,41 @@ pub fn validate_initial_context(
         return Err(CoreError::InvalidContext(format!(
             "private unverified {private_unverified} != {PRIVATE_UNVERIFIED_INFORMATION_COUNT}"
         )));
+    }
+
+    // Each realm must have exactly one Public Confirmed ReligiousMinority
+    // whose subject is that realm's local[1] (religious-minority) house.
+    for (realm_id, houses) in &houses_by_realm {
+        let local1 = houses.get(1).ok_or_else(|| {
+            CoreError::InvalidContext(format!("realm {realm_id} missing local[1]"))
+        })?;
+        let matches: Vec<_> = context
+            .information
+            .iter()
+            .filter(|i| {
+                i.realm_id == *realm_id
+                    && i.topic == InformationTopic::ReligiousMinority
+                    && i.scope == InformationScope::Public
+                    && i.confidence == InformationConfidence::Confirmed
+            })
+            .collect();
+        if matches.len() != 1 {
+            return Err(CoreError::InvalidContext(format!(
+                "realm {realm_id} Public Confirmed ReligiousMinority count {} != 1",
+                matches.len()
+            )));
+        }
+        let item = matches.first().ok_or_else(|| {
+            CoreError::InvalidContext(format!(
+                "realm {realm_id} Public Confirmed ReligiousMinority missing"
+            ))
+        })?;
+        if item.subject_ids != [local1.id.clone()] {
+            return Err(CoreError::InvalidContext(format!(
+                "realm {realm_id} ReligiousMinority subject {:?} != local[1] {}",
+                item.subject_ids, local1.id
+            )));
+        }
     }
 
     // Confirmed vs unverified knower sets differ; second promisee does not know conflict

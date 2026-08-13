@@ -7,8 +7,22 @@ use epoch_core::{
     validate_initial_context,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::process::Command;
 
 const SEEDS: [u64; 5] = [0, 1, 2, 42, u64::MAX];
+
+fn run_epoch_lab(args: &[&str]) -> std::process::Output {
+    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root.pop(); // crates
+    root.pop(); // workspace root
+    Command::new("cargo")
+        .current_dir(&root)
+        .args(["run", "-q", "-p", "epoch-lab", "--"])
+        .args(args)
+        .output()
+        .expect("cargo run -p epoch-lab")
+}
 
 #[test]
 fn counts_and_identity_distribution() {
@@ -403,6 +417,129 @@ fn malformed_context_returns_error_no_panic() {
 }
 
 #[test]
+fn validator_rejects_non_ring_cross_realm_and_missing_realm_minority_info() {
+    let cw = generate_context_world(1).expect("context");
+    let political = &cw.political;
+    let mut context = cw.context.clone();
+
+    // Replace a cross-realm ring pair with an arbitrary cross-realm house pair.
+    let house_realm: BTreeMap<_, _> = political
+        .dynastic
+        .population
+        .houses
+        .iter()
+        .map(|h| (h.id.as_str(), h.realm_id.as_str()))
+        .collect();
+    let mut houses_by_realm: BTreeMap<&str, Vec<_>> = BTreeMap::new();
+    for h in &political.dynastic.population.houses {
+        houses_by_realm
+            .entry(h.realm_id.as_str())
+            .or_default()
+            .push(h);
+    }
+    for list in houses_by_realm.values_mut() {
+        list.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+    let cross_idx = context
+        .relations
+        .iter()
+        .position(|r| house_realm[r.house_a_id.as_str()] != house_realm[r.house_b_id.as_str()])
+        .expect("cross relation");
+    // Use local[1] of realm-01 and local[1] of realm-02 (not ruling ring).
+    let h_a = houses_by_realm["realm-01"][1].id.clone();
+    let h_b = houses_by_realm["realm-02"][1].id.clone();
+    let (a, b) = if h_a < h_b { (h_a, h_b) } else { (h_b, h_a) };
+    context.relations[cross_idx].house_a_id = a;
+    context.relations[cross_idx].house_b_id = b;
+    context.relations[cross_idx].kind = HouseRelationKind::Cooperative;
+    context.relations.sort_by(|x, y| {
+        x.house_a_id
+            .cmp(&y.house_a_id)
+            .then_with(|| x.house_b_id.cmp(&y.house_b_id))
+    });
+    let err = validate_initial_context(political, &context).expect_err("non-ring cross");
+    assert!(matches!(err, CoreError::InvalidContext(_)), "got {err:?}");
+
+    // Valid context again: drop one realm's Public ReligiousMinority and duplicate another.
+    let mut context2 = cw.context.clone();
+    let mut public_idxs: Vec<usize> = context2
+        .information
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| {
+            i.topic == InformationTopic::ReligiousMinority
+                && i.scope == InformationScope::Public
+                && i.confidence == InformationConfidence::Confirmed
+        })
+        .map(|(idx, _)| idx)
+        .collect();
+    public_idxs.sort();
+    assert_eq!(public_idxs.len(), 6);
+    let drop_idx = public_idxs[0];
+    let dup_idx = public_idxs[1];
+    let dup = context2.information[dup_idx].clone();
+    context2.information[drop_idx] = dup;
+    // keep unique ids so only per-realm coverage fails
+    context2.information[drop_idx].id = "information-dup-test".to_string();
+    context2.information.sort_by(|a, b| a.id.cmp(&b.id));
+    let err2 = validate_initial_context(political, &context2).expect_err("missing realm public");
+    assert!(matches!(err2, CoreError::InvalidContext(_)), "got {err2:?}");
+}
+
+#[test]
+fn corrupted_political_input_fail_closed_no_panic() {
+    // short member_ids: derive must return Err without panic
+    let mut political_short = generate_political_world(1).expect("political short");
+    let context_ok = derive_initial_context(&political_short).expect("context for validate path");
+    political_short.dynastic.population.houses[0]
+        .member_ids
+        .truncate(1);
+    let err_derive = derive_initial_context(&political_short).expect_err("derive short members");
+    assert!(
+        matches!(err_derive, CoreError::InvalidContext(_)),
+        "got {err_derive:?}"
+    );
+    let err_validate =
+        validate_initial_context(&political_short, &context_ok).expect_err("validate short");
+    assert!(
+        matches!(err_validate, CoreError::InvalidContext(_)),
+        "got {err_validate:?}"
+    );
+
+    // missing house: population/political layer rejects before context indexing
+    let mut political_no_house = generate_political_world(1).expect("political no house");
+    political_no_house.dynastic.population.houses.pop();
+    let err_no_house =
+        derive_initial_context(&political_no_house).expect_err("derive missing house");
+    assert!(
+        matches!(err_no_house, CoreError::InvalidContext(_)),
+        "got {err_no_house:?}"
+    );
+    let err_validate_no_house =
+        validate_initial_context(&political_no_house, &context_ok).expect_err("validate no house");
+    assert!(
+        matches!(err_validate_no_house, CoreError::InvalidContext(_)),
+        "got {err_validate_no_house:?}"
+    );
+
+    // broken head reference
+    let mut political_bad_head = generate_political_world(1).expect("political bad head");
+    political_bad_head.dynastic.population.houses[0].head_person_id =
+        "person-does-not-exist".to_string();
+    let err_bad_head = derive_initial_context(&political_bad_head).expect_err("derive bad head");
+    assert!(
+        matches!(err_bad_head, CoreError::InvalidContext(_)),
+        "got {err_bad_head:?}"
+    );
+    let err_validate_bad_head =
+        validate_initial_context(&political_bad_head, &context_ok).expect_err("validate bad head");
+    assert!(
+        matches!(err_validate_bad_head, CoreError::InvalidContext(_)),
+        "got {err_validate_bad_head:?}"
+    );
+}
+
+#[test]
 fn public_private_information_contract() {
     let cw = generate_context_world(1).expect("context");
     for item in &cw.context.information {
@@ -419,4 +556,189 @@ fn public_private_information_contract() {
             ),
         }
     }
+}
+
+#[test]
+fn cli_context_1_succeeds() {
+    let output = run_epoch_lab(&["context", "1"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"schema_version\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"political\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"context\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"cultures\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"religions\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"relations\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"promises\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"information\""), "stdout: {stdout}");
+}
+
+#[test]
+fn cli_context_check_1_and_2_print_context_ok() {
+    for seed in ["1", "2"] {
+        let output = run_epoch_lab(&["context-check", seed]);
+        assert!(
+            output.status.success(),
+            "seed={seed} stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("CONTEXT_OK"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("seed={seed}")),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("cultures=3"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("religions=2"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("realm_profiles=6"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("house_profiles=18"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("person_profiles=144"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("relations=24"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("promises=12"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("information=18"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(stdout.contains("bytes="), "seed={seed} stdout: {stdout}");
+    }
+}
+
+#[test]
+fn cli_actors_check_1_2_exact_regression() {
+    let out1 = run_epoch_lab(&["actors-check", "1"]);
+    assert!(
+        out1.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    let s1 = String::from_utf8_lossy(&out1.stdout);
+    assert!(
+        s1.contains(
+            "ACTORS_OK seed=1 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39466"
+        ),
+        "stdout: {s1}"
+    );
+
+    let out2 = run_epoch_lab(&["actors-check", "2"]);
+    assert!(
+        out2.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    let s2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(
+        s2.contains(
+            "ACTORS_OK seed=2 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39465"
+        ),
+        "stdout: {s2}"
+    );
+}
+
+#[test]
+fn cli_population_check_1_2_exact_regression() {
+    let out1 = run_epoch_lab(&["population-check", "1"]);
+    assert!(
+        out1.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out1.stderr)
+    );
+    let s1 = String::from_utf8_lossy(&out1.stdout);
+    assert!(
+        s1.contains(
+            "POPULATION_OK seed=1 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34960"
+        ),
+        "stdout: {s1}"
+    );
+
+    let out2 = run_epoch_lab(&["population-check", "2"]);
+    assert!(
+        out2.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    let s2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(
+        s2.contains(
+            "POPULATION_OK seed=2 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34959"
+        ),
+        "stdout: {s2}"
+    );
+}
+
+#[test]
+fn cli_world_check_1_2_exact_regression() {
+    for seed in ["1", "2"] {
+        let output = run_epoch_lab(&["world-check", seed]);
+        assert!(
+            output.status.success(),
+            "seed={seed} stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("WORLD_OK"), "seed={seed} stdout: {stdout}");
+        assert!(
+            stdout.contains(&format!("seed={seed}")),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(stdout.contains("realms=6"), "seed={seed} stdout: {stdout}");
+        assert!(
+            stdout.contains("territories=36"),
+            "seed={seed} stdout: {stdout}"
+        );
+        assert!(stdout.contains("rulers=6"), "seed={seed} stdout: {stdout}");
+    }
+}
+
+#[test]
+fn cli_m0_replay_and_save_check_exact_regression() {
+    let replay = run_epoch_lab(&["replay-check", "1"]);
+    assert!(
+        replay.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&replay.stderr)
+    );
+    let replay_out = String::from_utf8_lossy(&replay.stdout);
+    assert!(
+        replay_out.contains("DETERMINISM_OK"),
+        "stdout: {replay_out}"
+    );
+    assert!(replay_out.contains("seed=1"), "stdout: {replay_out}");
+
+    let save = run_epoch_lab(&["save-check", "1"]);
+    assert!(
+        save.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&save.stderr)
+    );
+    let save_out = String::from_utf8_lossy(&save.stdout);
+    assert!(save_out.contains("SAVE_LOAD_OK"), "stdout: {save_out}");
+    assert!(save_out.contains("seed=1"), "stdout: {save_out}");
 }
