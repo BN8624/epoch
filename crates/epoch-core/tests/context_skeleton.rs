@@ -702,11 +702,9 @@ fn cli_world_check_1_2_exact_regression() {
         String::from_utf8_lossy(&out1.stderr)
     );
     let s1 = String::from_utf8_lossy(&out1.stdout);
-    assert!(
-        s1.contains(
-            "WORLD_OK seed=1 realms=6 territories=36 rulers=6 template=vertical bytes=6234"
-        ),
-        "stdout: {s1}"
+    assert_eq!(
+        s1.trim(),
+        "WORLD_OK seed=1 realms=6 territories=36 rulers=6 template=vertical bytes=6234"
     );
 
     let out2 = run_epoch_lab(&["world-check", "2"]);
@@ -716,11 +714,9 @@ fn cli_world_check_1_2_exact_regression() {
         String::from_utf8_lossy(&out2.stderr)
     );
     let s2 = String::from_utf8_lossy(&out2.stdout);
-    assert!(
-        s2.contains(
-            "WORLD_OK seed=2 realms=6 territories=36 rulers=6 template=blocks_2x3 bytes=6233"
-        ),
-        "stdout: {s2}"
+    assert_eq!(
+        s2.trim(),
+        "WORLD_OK seed=2 realms=6 territories=36 rulers=6 template=blocks_2x3 bytes=6233"
     );
 }
 
@@ -733,10 +729,7 @@ fn cli_m0_replay_and_save_check_exact_regression() {
         String::from_utf8_lossy(&replay1.stderr)
     );
     let r1 = String::from_utf8_lossy(&replay1.stdout);
-    assert!(
-        r1.contains("DETERMINISM_OK seed=1 events=5 bytes=7353"),
-        "stdout: {r1}"
-    );
+    assert_eq!(r1.trim(), "DETERMINISM_OK seed=1 events=5 bytes=7353");
 
     let replay2 = run_epoch_lab(&["replay-check", "2"]);
     assert!(
@@ -745,10 +738,7 @@ fn cli_m0_replay_and_save_check_exact_regression() {
         String::from_utf8_lossy(&replay2.stderr)
     );
     let r2 = String::from_utf8_lossy(&replay2.stdout);
-    assert!(
-        r2.contains("DETERMINISM_OK seed=2 events=5 bytes=7392"),
-        "stdout: {r2}"
-    );
+    assert_eq!(r2.trim(), "DETERMINISM_OK seed=2 events=5 bytes=7392");
 
     let save1 = run_epoch_lab(&["save-check", "1"]);
     assert!(
@@ -757,9 +747,9 @@ fn cli_m0_replay_and_save_check_exact_regression() {
         String::from_utf8_lossy(&save1.stderr)
     );
     let s1 = String::from_utf8_lossy(&save1.stdout);
-    assert!(
-        s1.contains("SAVE_LOAD_OK seed=1 checkpoint_bytes=2167 events=5"),
-        "stdout: {s1}"
+    assert_eq!(
+        s1.trim(),
+        "SAVE_LOAD_OK seed=1 checkpoint_bytes=2167 events=5"
     );
 
     let save2 = run_epoch_lab(&["save-check", "2"]);
@@ -769,8 +759,8 @@ fn cli_m0_replay_and_save_check_exact_regression() {
         String::from_utf8_lossy(&save2.stderr)
     );
     let s2 = String::from_utf8_lossy(&save2.stdout);
-    assert!(
-        s2.contains("SAVE_LOAD_OK seed=2 checkpoint_bytes=2167 events=5"),
-        "stdout: {s2}"
+    assert_eq!(
+        s2.trim(),
+        "SAVE_LOAD_OK seed=2 checkpoint_bytes=2167 events=5"
     );
 }
