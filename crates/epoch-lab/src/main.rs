@@ -1,10 +1,10 @@
 // EPOCH lab CLI — demo 및 결정론 재생·저장 검사
 
 use epoch_core::{
-    ActiveRole, GenerationBand, create_demo_checkpoint, generate_dynastic_world,
-    generate_political_world, generate_world, load_runtime_from_bytes, run_demo,
-    run_demo_to_runtime, save_runtime_to_bytes, validate_political_roster, validate_population,
-    validate_world,
+    ActiveRole, GenerationBand, create_demo_checkpoint, generate_context_world,
+    generate_dynastic_world, generate_political_world, generate_world, load_runtime_from_bytes,
+    run_demo, run_demo_to_runtime, save_runtime_to_bytes, validate_initial_context,
+    validate_political_roster, validate_population, validate_world,
 };
 use std::env;
 use std::fs;
@@ -33,6 +33,8 @@ fn main() -> ExitCode {
         "population-check" => cmd_population_check(&args),
         "actors" => cmd_actors(&args),
         "actors-check" => cmd_actors_check(&args),
+        "context" => cmd_context(&args),
+        "context-check" => cmd_context_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -57,6 +59,8 @@ Usage:
   cargo run -p epoch-lab -- population-check <seed>
   cargo run -p epoch-lab -- actors <seed>
   cargo run -p epoch-lab -- actors-check <seed>
+  cargo run -p epoch-lab -- context <seed>
+  cargo run -p epoch-lab -- context-check <seed>
 
 Commands:
   help              Show this help
@@ -69,6 +73,8 @@ Commands:
   population-check  Generate twice, verify determinism and population invariants
   actors            Generate political world and print pretty JSON
   actors-check      Generate twice, verify determinism and political roster invariants
+  context           Generate context world and print pretty JSON
+  context-check     Generate twice, verify determinism and context invariants
 "
     );
 }
@@ -87,6 +93,8 @@ Usage:
   cargo run -p epoch-lab -- population-check <seed>
   cargo run -p epoch-lab -- actors <seed>
   cargo run -p epoch-lab -- actors-check <seed>
+  cargo run -p epoch-lab -- context <seed>
+  cargo run -p epoch-lab -- context-check <seed>
 "
     );
 }
@@ -419,6 +427,122 @@ fn cmd_actors_check(args: &[String]) -> ExitCode {
         a.roster.active_actors.len(),
         a.roster.supporting_person_ids.len(),
         a.dynastic.world.realms.len(),
+        bytes_a.len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_context(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_context_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize context world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: context world generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_context_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_context_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_context_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first context world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second context world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_world(&a.political.dynastic.world) {
+        eprintln!("error: world invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_population(
+        &a.political.dynastic.world,
+        &a.political.dynastic.population,
+    ) {
+        eprintln!("error: population invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_political_roster(&a.political.dynastic, &a.political.roster) {
+        eprintln!("error: political roster invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_initial_context(&a.political, &a.context) {
+        eprintln!("error: context invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!(
+        "CONTEXT_OK seed={seed} cultures={} religions={} realm_profiles={} house_profiles={} person_profiles={} relations={} promises={} information={} bytes={}",
+        a.context.cultures.len(),
+        a.context.religions.len(),
+        a.context.realm_identities.len(),
+        a.context.house_identities.len(),
+        a.context.person_identities.len(),
+        a.context.relations.len(),
+        a.context.promises.len(),
+        a.context.information.len(),
         bytes_a.len()
     );
     ExitCode::SUCCESS
