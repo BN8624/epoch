@@ -1,6 +1,8 @@
 // EPOCH 결정론 코어 — 명령·스케줄·사건 재생 계약
 
 pub mod command;
+pub mod context;
+pub mod contextgen;
 pub mod demo;
 pub mod error;
 pub mod event;
@@ -19,6 +21,13 @@ pub mod worldgen;
 pub use command::{
     Command, CommandEnvelope, EXPOSE_DUPLICATE_PROMISE, SubmitSpec, execute_command, submit_command,
 };
+pub use context::{
+    CONTEXT_WORLD_SCHEMA_VERSION, CULTURE_COUNT, ContextWorld, Culture, HouseIdentity,
+    HouseRelation, HouseRelationKind, INFORMATION_COUNT, InformationConfidence, InformationItem,
+    InformationScope, InformationTopic, InitialPoliticalContext, PROMISE_COUNT, PersonIdentity,
+    Promise, RELATION_COUNT, RELIGION_COUNT, RealmIdentity, Religion,
+};
+pub use contextgen::{derive_initial_context, generate_context_world, validate_initial_context};
 pub use demo::{
     DemoResult, create_demo_checkpoint, create_demo_runtime, run_demo, run_demo_to_runtime,
     run_demo_via_checkpoint,
