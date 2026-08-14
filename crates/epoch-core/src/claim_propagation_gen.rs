@@ -150,6 +150,41 @@ fn require_sorted_unique_ids(ids: &[String], what: &str) -> Result<(), CoreError
     Ok(())
 }
 
+fn derived_claim_id_for_rank(rank: usize) -> Result<String, CoreError> {
+    let n = rank
+        .checked_add(1)
+        .ok_or_else(|| invalid_propagation("derived realm rank overflow"))?;
+    Ok(format!("derived-claim-{n:02}"))
+}
+
+fn require_derived_stable_sort(derived_claims: &[DerivedSuccessionClaim]) -> Result<(), CoreError> {
+    for window in derived_claims.windows(2) {
+        let a = window
+            .first()
+            .ok_or_else(|| invalid_propagation("derived sort window"))?;
+        let b = window
+            .get(1)
+            .ok_or_else(|| invalid_propagation("derived sort window"))?;
+        let ka = (
+            a.realm_id.as_str(),
+            a.source_claim_id.as_str(),
+            a.claimant_person_id.as_str(),
+        );
+        let kb = (
+            b.realm_id.as_str(),
+            b.source_claim_id.as_str(),
+            b.claimant_person_id.as_str(),
+        );
+        if ka >= kb {
+            return Err(invalid_propagation(format!(
+                "derived_claims not sorted by (realm_id, source_claim_id, claimant_person_id): {} / {}",
+                a.id, b.id
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn is_cultural_minority_house(
     house_id: &str,
     realm_id: &str,
@@ -239,7 +274,7 @@ pub fn derive_initial_claim_propagation(
             .then(a.claimant_person_id.cmp(&b.claimant_person_id))
     });
     for (idx, derived) in candidates.iter_mut().enumerate() {
-        derived.id = format!("derived-claim-{:02}", idx + 1);
+        derived.id = derived_claim_id_for_rank(idx)?;
     }
 
     let propagation = InitialClaimPropagation {
@@ -294,17 +329,54 @@ pub fn validate_initial_claim_propagation(
         .map(|c| c.id.clone())
         .collect();
     require_sorted_unique_ids(&derived_ids, "derived_claims")?;
+    require_derived_stable_sort(&propagation.derived_claims)?;
+
+    let sorted_realm_ids: Vec<&str> = lookups.realm_identity_by_id.keys().copied().collect();
+    if sorted_realm_ids.len() != WORLD_REALM_COUNT {
+        return Err(invalid_propagation(format!(
+            "realm identities {} != {WORLD_REALM_COUNT}",
+            sorted_realm_ids.len()
+        )));
+    }
 
     let mut seen_ids: BTreeSet<&str> = BTreeSet::new();
     let mut seen_provenance: BTreeSet<(&str, &str, &str)> = BTreeSet::new();
     let mut derived_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
 
     for (idx, derived) in propagation.derived_claims.iter().enumerate() {
-        let expected_id = format!("derived-claim-{:02}", idx + 1);
+        let expected_id = derived_claim_id_for_rank(idx)?;
         if derived.id != expected_id {
             return Err(invalid_propagation(format!(
                 "derived id {} != {expected_id}",
                 derived.id
+            )));
+        }
+        let expected_realm_id = sorted_realm_ids.get(idx).copied().ok_or_else(|| {
+            invalid_propagation(format!(
+                "derived {} index {idx} has no corresponding realm",
+                derived.id
+            ))
+        })?;
+        if derived.realm_id != expected_realm_id {
+            return Err(invalid_propagation(format!(
+                "derived {} realm {} != {expected_realm_id}",
+                derived.id, derived.realm_id
+            )));
+        }
+        let realm_rank = sorted_realm_ids
+            .iter()
+            .position(|id| *id == derived.realm_id.as_str())
+            .ok_or_else(|| {
+                invalid_propagation(format!(
+                    "unknown derived realm {} for {}",
+                    derived.realm_id, derived.id
+                ))
+            })?;
+        let expected_id_for_realm = derived_claim_id_for_rank(realm_rank)?;
+        if derived.id != expected_id_for_realm {
+            return Err(invalid_propagation(format!(
+                "derived id {} != {expected_id_for_realm} for realm {}",
+                derived.id, derived.realm_id
             )));
         }
         if !seen_ids.insert(derived.id.as_str()) {

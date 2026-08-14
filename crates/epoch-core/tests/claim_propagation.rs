@@ -779,6 +779,28 @@ fn malformed_propagation_fail_closed_no_panic() {
         "got {err:?}"
     );
 
+    let mut swapped_realm_ids = world.propagation.clone();
+    if let (Some(first), Some(second)) = (
+        swapped_realm_ids.derived_claims.first().cloned(),
+        swapped_realm_ids.derived_claims.get(1).cloned(),
+    ) {
+        let mut new_first = second;
+        let mut new_second = first;
+        new_first.id = "derived-claim-01".to_string();
+        new_second.id = "derived-claim-02".to_string();
+        if let Some(slot) = swapped_realm_ids.derived_claims.first_mut() {
+            *slot = new_first;
+        }
+        if let Some(slot) = swapped_realm_ids.derived_claims.get_mut(1) {
+            *slot = new_second;
+        }
+    }
+    let err = validate_initial_claim_propagation(fw, &swapped_realm_ids).unwrap_err();
+    assert!(
+        matches!(err, CoreError::InvalidClaimPropagation(_)),
+        "got {err:?}"
+    );
+
     let mut target_mismatch = world.propagation.clone();
     if let Some(first) = target_mismatch.derived_claims.first_mut() {
         first.succession_target_key = "succession:realm-02".to_string();
