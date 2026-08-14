@@ -60,6 +60,8 @@ pub enum CoreError {
     InvalidPolitical(String),
     /// 초기 정치 맥락 생성·검증 불변식 위반 (fail closed).
     InvalidContext(String),
+    /// 초기 계승 권리 생성·검증 불변식 위반 (fail closed).
+    InvalidRights(String),
 }
 
 impl fmt::Display for CoreError {
@@ -116,6 +118,7 @@ impl fmt::Display for CoreError {
             CoreError::InvalidPopulation(msg) => write!(f, "invalid population: {msg}"),
             CoreError::InvalidPolitical(msg) => write!(f, "invalid political: {msg}"),
             CoreError::InvalidContext(msg) => write!(f, "invalid context: {msg}"),
+            CoreError::InvalidRights(msg) => write!(f, "invalid rights: {msg}"),
         }
     }
 }
