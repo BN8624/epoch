@@ -2,11 +2,11 @@
 
 use epoch_core::{
     ActiveRole, ClaimBasis, ClaimStanding, GenerationBand, create_demo_checkpoint,
-    generate_context_world, generate_dynastic_world, generate_family_world,
-    generate_political_world, generate_rights_world, generate_world, load_runtime_from_bytes,
-    run_demo, run_demo_to_runtime, save_runtime_to_bytes, validate_initial_context,
-    validate_initial_family, validate_initial_rights, validate_political_roster,
-    validate_population, validate_world,
+    generate_claim_propagation_world, generate_context_world, generate_dynastic_world,
+    generate_family_world, generate_political_world, generate_rights_world, generate_world,
+    load_runtime_from_bytes, run_demo, run_demo_to_runtime, save_runtime_to_bytes,
+    validate_initial_claim_propagation, validate_initial_context, validate_initial_family,
+    validate_initial_rights, validate_political_roster, validate_population, validate_world,
 };
 use std::env;
 use std::fs;
@@ -41,6 +41,8 @@ fn main() -> ExitCode {
         "rights-check" => cmd_rights_check(&args),
         "family" => cmd_family(&args),
         "family-check" => cmd_family_check(&args),
+        "claim-propagation" => cmd_claim_propagation(&args),
+        "claim-propagation-check" => cmd_claim_propagation_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -71,6 +73,8 @@ Usage:
   cargo run -p epoch-lab -- rights-check <seed>
   cargo run -p epoch-lab -- family <seed>
   cargo run -p epoch-lab -- family-check <seed>
+  cargo run -p epoch-lab -- claim-propagation <seed>
+  cargo run -p epoch-lab -- claim-propagation-check <seed>
 
 Commands:
   help              Show this help
@@ -89,6 +93,8 @@ Commands:
   rights-check      Generate twice, verify determinism and rights invariants
   family            Generate family world and print pretty JSON
   family-check      Generate twice, verify determinism and family invariants
+  claim-propagation Generate claim-propagation world and print pretty JSON
+  claim-propagation-check  Generate twice, verify determinism and derived-claim invariants
 "
     );
 }
@@ -113,6 +119,8 @@ Usage:
   cargo run -p epoch-lab -- rights-check <seed>
   cargo run -p epoch-lab -- family <seed>
   cargo run -p epoch-lab -- family-check <seed>
+  cargo run -p epoch-lab -- claim-propagation <seed>
+  cargo run -p epoch-lab -- claim-propagation-check <seed>
 "
     );
 }
@@ -865,6 +873,146 @@ fn cmd_family_check(args: &[String]) -> ExitCode {
         "FAMILY_OK seed={seed} marriages={} parentages={} interfaith={interfaith} intercultural={intercultural} dual_parent_children={dual_parent_children} bytes={}",
         a.family.marriages.len(),
         a.family.parentages.len(),
+        bytes_a.len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_claim_propagation(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_claim_propagation_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize claim propagation world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: claim propagation generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_claim_propagation_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_claim_propagation_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_claim_propagation_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first claim propagation world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second claim propagation world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_initial_claim_propagation(&a.family_world, &a.propagation) {
+        eprintln!("error: claim propagation invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    let original = a.family_world.rights_world.rights.claims.len();
+    let derived = a.propagation.derived_claims.len();
+    let claim_by_id: std::collections::BTreeMap<&str, &epoch_core::SuccessionClaim> = a
+        .family_world
+        .rights_world
+        .rights
+        .claims
+        .iter()
+        .map(|c| (c.id.as_str(), c))
+        .collect();
+    let supporting: std::collections::BTreeSet<&str> = a
+        .family_world
+        .rights_world
+        .context_world
+        .political
+        .roster
+        .supporting_person_ids
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let mut restored_sources = 0usize;
+    let mut direct_sources = 0usize;
+    let mut distance1 = 0usize;
+    let mut derived_supporting = 0usize;
+    for derived_claim in &a.propagation.derived_claims {
+        let source = match claim_by_id.get(derived_claim.source_claim_id.as_str()) {
+            Some(claim) => *claim,
+            None => {
+                eprintln!(
+                    "error: unknown source claim {}",
+                    derived_claim.source_claim_id
+                );
+                return ExitCode::from(1);
+            }
+        };
+        match source.basis {
+            ClaimBasis::RestoredLineRecord => restored_sources += 1,
+            ClaimBasis::DirectDescent => direct_sources += 1,
+        }
+        if derived_claim.generation_distance == 1 {
+            distance1 += 1;
+        }
+        if supporting.contains(derived_claim.claimant_person_id.as_str()) {
+            derived_supporting += 1;
+        }
+    }
+
+    println!(
+        "CLAIM_PROPAGATION_OK seed={seed} original={original} derived={derived} restored_sources={restored_sources} direct_sources={direct_sources} distance1={distance1} derived_supporting={derived_supporting} bytes={}",
         bytes_a.len()
     );
     ExitCode::SUCCESS
