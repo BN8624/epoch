@@ -8,22 +8,12 @@ use epoch_core::{
     generate_dynastic_world, generate_family_world, generate_rights_world, validate_initial_family,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::process::Command;
+
+mod common;
+
+use common::run_epoch_lab;
 
 const SEEDS: [u64; 5] = [0, 1, 2, 42, u64::MAX];
-
-fn run_epoch_lab(args: &[&str]) -> std::process::Output {
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.pop(); // crates
-    root.pop(); // workspace root
-    Command::new("cargo")
-        .current_dir(&root)
-        .args(["run", "-q", "-p", "epoch-lab", "--"])
-        .args(args)
-        .output()
-        .expect("cargo run -p epoch-lab")
-}
 
 fn person_by_id(
     world: &epoch_core::FamilyWorld,
@@ -857,79 +847,7 @@ fn cli_family_check_1_and_2_print_family_ok() {
 
 #[test]
 fn existing_m1_and_m0_exact_regression() {
-    let checks = [
-        (
-            ["rights-check", "1"],
-            "RIGHTS_OK seed=1 realms=6 claims=12 direct=6 restored=6 strong=6 contested=6 evidence=6 bytes=66222",
-        ),
-        (
-            ["rights-check", "2"],
-            "RIGHTS_OK seed=2 realms=6 claims=12 direct=6 restored=6 strong=6 contested=6 evidence=6 bytes=66221",
-        ),
-        (
-            ["context-check", "1"],
-            "CONTEXT_OK seed=1 cultures=3 religions=2 realm_profiles=6 house_profiles=18 person_profiles=144 relations=24 promises=12 information=18 bytes=61898",
-        ),
-        (
-            ["context-check", "2"],
-            "CONTEXT_OK seed=2 cultures=3 religions=2 realm_profiles=6 house_profiles=18 person_profiles=144 relations=24 promises=12 information=18 bytes=61897",
-        ),
-        (
-            ["actors-check", "1"],
-            "ACTORS_OK seed=1 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39466",
-        ),
-        (
-            ["actors-check", "2"],
-            "ACTORS_OK seed=2 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39465",
-        ),
-        (
-            ["population-check", "1"],
-            "POPULATION_OK seed=1 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34960",
-        ),
-        (
-            ["population-check", "2"],
-            "POPULATION_OK seed=2 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34959",
-        ),
-        (
-            ["world-check", "1"],
-            "WORLD_OK seed=1 realms=6 territories=36 rulers=6 template=vertical bytes=6234",
-        ),
-        (
-            ["world-check", "2"],
-            "WORLD_OK seed=2 realms=6 territories=36 rulers=6 template=blocks_2x3 bytes=6233",
-        ),
-        (
-            ["replay-check", "1"],
-            "DETERMINISM_OK seed=1 events=5 bytes=7353",
-        ),
-        (
-            ["replay-check", "2"],
-            "DETERMINISM_OK seed=2 events=5 bytes=7392",
-        ),
-        (
-            ["save-check", "1"],
-            "SAVE_LOAD_OK seed=1 checkpoint_bytes=2167 events=5",
-        ),
-        (
-            ["save-check", "2"],
-            "SAVE_LOAD_OK seed=2 checkpoint_bytes=2167 events=5",
-        ),
-    ];
-    for (args, expected) in checks {
-        let output = run_epoch_lab(&args);
-        assert!(
-            output.status.success(),
-            "{} stderr: {}",
-            args[0],
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            expected,
-            "{}",
-            args[0]
-        );
-    }
+    common::assert_cli_exact_regression();
 }
 
 #[test]

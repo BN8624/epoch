@@ -46,10 +46,9 @@ fn cli_export_seed1_prints_ok_line() {
         "stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("APP_EXPORT_OK seed=1 rights_bytes=66222 files=5"),
-        "stdout={stdout}"
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "APP_EXPORT_OK seed=1 rights_bytes=66222 files=5"
     );
 }
 

@@ -7,20 +7,10 @@ use epoch_core::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-/// 현재 소스에서 빌드된 바이너리만 검사하도록 항상 cargo run을 사용한다.
-fn run_epoch_lab(args: &[&str]) -> std::process::Output {
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.pop(); // crates
-    root.pop(); // workspace root
-    Command::new("cargo")
-        .current_dir(&root)
-        .args(["run", "-q", "-p", "epoch-lab", "--"])
-        .args(args)
-        .output()
-        .expect("cargo run -p epoch-lab")
-}
+mod common;
+
+use common::{expected_cli_output, run_epoch_lab};
 
 /// 시스템 temp에 남아 있는 epoch-lab save-check 임시 파일 목록 (seed별).
 fn list_save_check_temp_files(seed: u64) -> Vec<PathBuf> {
@@ -284,18 +274,7 @@ fn demo_completes_without_panic() {
     let _ = run_demo(1).expect("ok");
 }
 
-#[test]
-fn cli_replay_check_1_prints_determinism_ok() {
-    let output = run_epoch_lab(&["replay-check", "1"]);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("DETERMINISM_OK"), "stdout: {stdout}");
-    assert!(stdout.contains("seed=1"));
-}
+// replay-check 1/2의 exact 회귀는 common::CLI_EXACT_REGRESSION이 담당한다.
 
 #[test]
 fn cli_invalid_args_nonzero_exit() {
@@ -391,34 +370,31 @@ fn uninterrupted_vs_save_load_resume_full_equality() {
     assert_eq!(checkpoint_bytes, resaved);
 }
 
-#[test]
-fn cli_save_check_1_prints_ok() {
-    let before = list_save_check_temp_files(1);
-    let output = run_epoch_lab(&["save-check", "1"]);
-    let after = list_save_check_temp_files(1);
+/// save-check 성공 출력과 함께 임시 파일이 남지 않는지 확인한다.
+fn assert_save_check_clean_run(seed: u64) {
+    let args = ["save-check", if seed == 1 { "1" } else { "2" }];
+    let before = list_save_check_temp_files(seed);
+    let output = run_epoch_lab(&args);
+    let after = list_save_check_temp_files(seed);
     assert!(
         output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
-    assert!(stdout.contains("seed=1"));
-    assert_save_check_temp_cleaned(1, &before, &after);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        expected_cli_output(args),
+        "seed={seed}"
+    );
+    assert_save_check_temp_cleaned(seed, &before, &after);
 }
 
 #[test]
-fn cli_save_check_2_prints_ok() {
-    let before = list_save_check_temp_files(2);
-    let output = run_epoch_lab(&["save-check", "2"]);
-    let after = list_save_check_temp_files(2);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("SAVE_LOAD_OK"), "stdout: {stdout}");
-    assert!(stdout.contains("seed=2"));
-    assert_save_check_temp_cleaned(2, &before, &after);
+fn cli_save_check_1_leaves_no_temp_files() {
+    assert_save_check_clean_run(1);
+}
+
+#[test]
+fn cli_save_check_2_leaves_no_temp_files() {
+    assert_save_check_clean_run(2);
 }

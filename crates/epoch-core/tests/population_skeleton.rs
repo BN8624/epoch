@@ -5,20 +5,8 @@ use epoch_core::{
     validate_population, validate_world,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::process::Command;
 
-fn run_epoch_lab(args: &[&str]) -> std::process::Output {
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.pop(); // crates
-    root.pop(); // workspace root
-    Command::new("cargo")
-        .current_dir(&root)
-        .args(["run", "-q", "-p", "epoch-lab", "--"])
-        .args(args)
-        .output()
-        .expect("cargo run -p epoch-lab")
-}
+mod common;
 
 #[test]
 fn exact_counts_and_generations() {
@@ -272,50 +260,12 @@ fn full_invariants_on_representative_seeds() {
     }
 }
 
+// population-check 1/2의 exact 회귀는 common::CLI_EXACT_REGRESSION이 담당한다.
+
 #[test]
 fn cli_population_1_succeeds() {
-    let output = run_epoch_lab(&["population", "1"]);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    common::assert_cli_json_eq(
+        &["population", "1"],
+        &generate_dynastic_world(1).expect("dynastic 1"),
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"schema_version\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"population\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"houses\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"persons\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"ruler_links\""), "stdout: {stdout}");
-}
-
-#[test]
-fn cli_population_check_1_prints_population_ok() {
-    let output = run_epoch_lab(&["population-check", "1"]);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("POPULATION_OK"), "stdout: {stdout}");
-    assert!(stdout.contains("seed=1"), "stdout: {stdout}");
-    assert!(stdout.contains("houses=18"), "stdout: {stdout}");
-    assert!(stdout.contains("persons=144"), "stdout: {stdout}");
-    assert!(stdout.contains("elder=36"), "stdout: {stdout}");
-    assert!(stdout.contains("current=54"), "stdout: {stdout}");
-    assert!(stdout.contains("young=54"), "stdout: {stdout}");
-    assert!(stdout.contains("rulers=6"), "stdout: {stdout}");
-}
-
-#[test]
-fn cli_population_check_2_prints_population_ok() {
-    let output = run_epoch_lab(&["population-check", "2"]);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("POPULATION_OK"), "stdout: {stdout}");
-    assert!(stdout.contains("seed=2"), "stdout: {stdout}");
 }

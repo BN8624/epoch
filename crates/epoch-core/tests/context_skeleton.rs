@@ -7,22 +7,10 @@ use epoch_core::{
     validate_initial_context,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::process::Command;
+
+mod common;
 
 const SEEDS: [u64; 5] = [0, 1, 2, 42, u64::MAX];
-
-fn run_epoch_lab(args: &[&str]) -> std::process::Output {
-    let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root.pop(); // crates
-    root.pop(); // workspace root
-    Command::new("cargo")
-        .current_dir(&root)
-        .args(["run", "-q", "-p", "epoch-lab", "--"])
-        .args(args)
-        .output()
-        .expect("cargo run -p epoch-lab")
-}
 
 #[test]
 fn counts_and_identity_distribution() {
@@ -558,209 +546,13 @@ fn public_private_information_contract() {
     }
 }
 
+// context-check 1/2를 포함한 M0~M1.5 exact 회귀는
+// common::CLI_EXACT_REGRESSION이 한 곳에서 담당한다.
+
 #[test]
 fn cli_context_1_succeeds() {
-    let output = run_epoch_lab(&["context", "1"]);
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"schema_version\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"political\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"context\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"cultures\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"religions\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"relations\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"promises\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"information\""), "stdout: {stdout}");
-}
-
-#[test]
-fn cli_context_check_1_and_2_print_context_ok() {
-    for seed in ["1", "2"] {
-        let output = run_epoch_lab(&["context-check", seed]);
-        assert!(
-            output.status.success(),
-            "seed={seed} stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("CONTEXT_OK"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains(&format!("seed={seed}")),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("cultures=3"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("religions=2"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("realm_profiles=6"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("house_profiles=18"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("person_profiles=144"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("relations=24"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("promises=12"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("information=18"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(stdout.contains("bytes="), "seed={seed} stdout: {stdout}");
-    }
-}
-
-#[test]
-fn cli_actors_check_1_2_exact_regression() {
-    let out1 = run_epoch_lab(&["actors-check", "1"]);
-    assert!(
-        out1.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out1.stderr)
-    );
-    let s1 = String::from_utf8_lossy(&out1.stdout);
-    assert!(
-        s1.contains(
-            "ACTORS_OK seed=1 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39466"
-        ),
-        "stdout: {s1}"
-    );
-
-    let out2 = run_epoch_lab(&["actors-check", "2"]);
-    assert!(
-        out2.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out2.stderr)
-    );
-    let s2 = String::from_utf8_lossy(&out2.stdout);
-    assert!(
-        s2.contains(
-            "ACTORS_OK seed=2 active=24 supporting=120 rulers=6 house_heads=12 ruling_house_current=6 realms=6 bytes=39465"
-        ),
-        "stdout: {s2}"
-    );
-}
-
-#[test]
-fn cli_population_check_1_2_exact_regression() {
-    let out1 = run_epoch_lab(&["population-check", "1"]);
-    assert!(
-        out1.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out1.stderr)
-    );
-    let s1 = String::from_utf8_lossy(&out1.stdout);
-    assert!(
-        s1.contains(
-            "POPULATION_OK seed=1 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34960"
-        ),
-        "stdout: {s1}"
-    );
-
-    let out2 = run_epoch_lab(&["population-check", "2"]);
-    assert!(
-        out2.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out2.stderr)
-    );
-    let s2 = String::from_utf8_lossy(&out2.stdout);
-    assert!(
-        s2.contains(
-            "POPULATION_OK seed=2 houses=18 persons=144 elder=36 current=54 young=54 rulers=6 bytes=34959"
-        ),
-        "stdout: {s2}"
-    );
-}
-
-#[test]
-fn cli_world_check_1_2_exact_regression() {
-    let out1 = run_epoch_lab(&["world-check", "1"]);
-    assert!(
-        out1.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out1.stderr)
-    );
-    let s1 = String::from_utf8_lossy(&out1.stdout);
-    assert_eq!(
-        s1.trim(),
-        "WORLD_OK seed=1 realms=6 territories=36 rulers=6 template=vertical bytes=6234"
-    );
-
-    let out2 = run_epoch_lab(&["world-check", "2"]);
-    assert!(
-        out2.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out2.stderr)
-    );
-    let s2 = String::from_utf8_lossy(&out2.stdout);
-    assert_eq!(
-        s2.trim(),
-        "WORLD_OK seed=2 realms=6 territories=36 rulers=6 template=blocks_2x3 bytes=6233"
-    );
-}
-
-#[test]
-fn cli_m0_replay_and_save_check_exact_regression() {
-    let replay1 = run_epoch_lab(&["replay-check", "1"]);
-    assert!(
-        replay1.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&replay1.stderr)
-    );
-    let r1 = String::from_utf8_lossy(&replay1.stdout);
-    assert_eq!(r1.trim(), "DETERMINISM_OK seed=1 events=5 bytes=7353");
-
-    let replay2 = run_epoch_lab(&["replay-check", "2"]);
-    assert!(
-        replay2.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&replay2.stderr)
-    );
-    let r2 = String::from_utf8_lossy(&replay2.stdout);
-    assert_eq!(r2.trim(), "DETERMINISM_OK seed=2 events=5 bytes=7392");
-
-    let save1 = run_epoch_lab(&["save-check", "1"]);
-    assert!(
-        save1.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&save1.stderr)
-    );
-    let s1 = String::from_utf8_lossy(&save1.stdout);
-    assert_eq!(
-        s1.trim(),
-        "SAVE_LOAD_OK seed=1 checkpoint_bytes=2167 events=5"
-    );
-
-    let save2 = run_epoch_lab(&["save-check", "2"]);
-    assert!(
-        save2.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&save2.stderr)
-    );
-    let s2 = String::from_utf8_lossy(&save2.stdout);
-    assert_eq!(
-        s2.trim(),
-        "SAVE_LOAD_OK seed=2 checkpoint_bytes=2167 events=5"
+    common::assert_cli_json_eq(
+        &["context", "1"],
+        &generate_context_world(1).expect("context 1"),
     );
 }
