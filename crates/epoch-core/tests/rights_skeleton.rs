@@ -455,6 +455,15 @@ fn malformed_rights_fail_closed_no_panic() {
     let err = validate_initial_rights(cw, &missing_evidence).unwrap_err();
     assert!(matches!(err, CoreError::InvalidRights(_)), "got {err:?}");
 
+    let mut dup_evidence = rw.rights.clone();
+    if let Some(first) = dup_evidence.evidence_records.first().cloned()
+        && let Some(last) = dup_evidence.evidence_records.last_mut()
+    {
+        last.id = first.id;
+    }
+    let err = validate_initial_rights(cw, &dup_evidence).unwrap_err();
+    assert!(matches!(err, CoreError::InvalidRights(_)), "got {err:?}");
+
     let mut unknown_claimant = rw.rights.clone();
     unknown_claimant.claims[0].claimant_person_id = "person-does-not-exist".to_string();
     let err = validate_initial_rights(cw, &unknown_claimant).unwrap_err();
@@ -681,9 +690,10 @@ fn cli_context_check_1_2_exact_regression() {
         String::from_utf8_lossy(&out1.stderr)
     );
     let s1 = String::from_utf8_lossy(&out1.stdout);
-    assert!(s1.contains("CONTEXT_OK seed=1"), "stdout: {s1}");
-    assert!(s1.contains("cultures=3"), "stdout: {s1}");
-    assert!(s1.contains("information=18"), "stdout: {s1}");
+    assert_eq!(
+        s1.trim(),
+        "CONTEXT_OK seed=1 cultures=3 religions=2 realm_profiles=6 house_profiles=18 person_profiles=144 relations=24 promises=12 information=18 bytes=61898"
+    );
 
     let out2 = run_epoch_lab(&["context-check", "2"]);
     assert!(
@@ -692,7 +702,10 @@ fn cli_context_check_1_2_exact_regression() {
         String::from_utf8_lossy(&out2.stderr)
     );
     let s2 = String::from_utf8_lossy(&out2.stdout);
-    assert!(s2.contains("CONTEXT_OK seed=2"), "stdout: {s2}");
+    assert_eq!(
+        s2.trim(),
+        "CONTEXT_OK seed=2 cultures=3 religions=2 realm_profiles=6 house_profiles=18 person_profiles=144 relations=24 promises=12 information=18 bytes=61897"
+    );
 }
 
 #[test]
