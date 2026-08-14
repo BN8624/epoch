@@ -678,6 +678,15 @@ pub fn validate_initial_rights(
                 direct.id
             )));
         }
+        let expected_direct_member = ruling.member_ids.get(5).ok_or_else(|| {
+            invalid_rights(format!("ruling house {} missing member_ids[5]", ruling.id))
+        })?;
+        if direct_claim.claimant_person_id != *expected_direct_member {
+            return Err(invalid_rights(format!(
+                "direct claimant {} != ruling house {} member_ids[5] {}",
+                direct_claim.claimant_person_id, ruling.id, expected_direct_member
+            )));
+        }
         if direct.generation != GenerationBand::Young {
             return Err(invalid_rights(format!(
                 "direct claimant {} is not Young",
