@@ -105,7 +105,7 @@ function hasConflict(info, confidence) {
 test('seed 1 view-model projection and realm-01 asymmetry', () => {
   const { outDir, world, stdout } = exportWorld(1);
   try {
-    assert.match(stdout, /APP_EXPORT_OK seed=1 rights_bytes=66222 files=5/);
+    assert.equal(stdout.trim(), 'APP_EXPORT_OK seed=1 rights_bytes=66222 files=5');
     const idx = buildIndexes(world);
     const summary = getWorldSummary(idx);
     assert.equal(summary.seed, 1);
@@ -168,7 +168,11 @@ test('seed 1 view-model projection and realm-01 asymmetry', () => {
     assert.ok(
       rawRestored.evidence_record_ids.every((id) => idx.evidenceById[id]),
     );
-    assert.match(realmView.claims[1].evidenceLabel, /역사 기록/);
+    // '연결된 역사 기록 없음'도 /역사 기록/에 매칭되므로 정확한 문구로 비교한다.
+    assert.equal(
+      realmView.claims[1].evidenceLabel,
+      '옛 계통을 뒷받침하는 역사 기록 보유',
+    );
 
     const directPerson = getPersonView(idx, realmView.claims[0].personId);
     assert.equal(directPerson.generation, 'young');
@@ -182,7 +186,20 @@ test('seed 1 view-model projection and realm-01 asymmetry', () => {
     assert.equal(elderView.parentLabel, '알려진 부모 기록 없음');
 
     const relations = getHouseRelations(idx, rulingHouse.id);
-    assert.ok(relations.length >= 1);
+    const expectedRelationPartners = idx.layers.context.relations
+      .filter(
+        (rel) =>
+          rel.house_a_id === rulingHouse.id || rel.house_b_id === rulingHouse.id,
+      )
+      .map((rel) =>
+        rel.house_a_id === rulingHouse.id ? rel.house_b_id : rel.house_a_id,
+      )
+      .sort();
+    assert.ok(expectedRelationPartners.length > 0);
+    assert.deepEqual(
+      relations.map((rel) => rel.otherHouseId).sort(),
+      expectedRelationPartners,
+    );
     for (const rel of relations) {
       assert.match(rel.sentence, /관계입니다/);
       assert.ok(['협력', '대립', '경쟁'].includes(rel.kindLabel));
