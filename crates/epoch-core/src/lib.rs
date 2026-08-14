@@ -6,6 +6,8 @@ pub mod contextgen;
 pub mod demo;
 pub mod error;
 pub mod event;
+pub mod family;
+pub mod familygen;
 pub mod model;
 pub mod political;
 pub mod politicalgen;
@@ -36,6 +38,13 @@ pub use demo::{
 };
 pub use error::CoreError;
 pub use event::{ContributionClass, Event, InfluenceLink, RandomDraw, StateChange};
+pub use family::{
+    FAMILY_WORLD_SCHEMA_VERSION, FamilyWorld, InitialFamilyNetwork, MARRIAGE_COUNT, Marriage,
+    PARENTAGE_COUNT, ParentageLink,
+};
+pub use familygen::{
+    derive_initial_family, effective_parent_ids, generate_family_world, validate_initial_family,
+};
 pub use model::{
     Candidate, House, Information, InformationVisibility, Player, SupportStatus, WorldState,
 };

@@ -62,6 +62,8 @@ pub enum CoreError {
     InvalidContext(String),
     /// 초기 계승 권리 생성·검증 불변식 위반 (fail closed).
     InvalidRights(String),
+    /// 초기 혼인·혈통망 생성·검증 불변식 위반 (fail closed).
+    InvalidFamily(String),
 }
 
 impl fmt::Display for CoreError {
@@ -119,6 +121,7 @@ impl fmt::Display for CoreError {
             CoreError::InvalidPolitical(msg) => write!(f, "invalid political: {msg}"),
             CoreError::InvalidContext(msg) => write!(f, "invalid context: {msg}"),
             CoreError::InvalidRights(msg) => write!(f, "invalid rights: {msg}"),
+            CoreError::InvalidFamily(msg) => write!(f, "invalid family: {msg}"),
         }
     }
 }
