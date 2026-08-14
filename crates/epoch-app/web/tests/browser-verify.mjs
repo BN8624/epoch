@@ -233,14 +233,21 @@ try {
   const otherCapital = otherRealm.capital_territory_id;
   const houses = housesForRealm(idx, 'realm-01');
   const realm01 = getRealmView(idx, 'realm-01');
+  const rulingHouse = houses.find((house) => house.ruling);
+  const nonRuling = houses.filter((house) => !house.ruling);
+  const realmActors = idx.layers.roster.active_actors.filter(
+    (actor) => actor.realm_id === 'realm-01',
+  );
+  const rulerActor = realmActors.find((actor) => actor.primary_role === 'ruler');
+  const rhcActor = realmActors.find((actor) => actor.primary_role === 'ruling_house_current');
   const actors = {
-    rulerId: houses[0].headPersonId,
-    rhcId: houses[0].memberIds[3],
-    firstHeadId: houses[1].headPersonId,
-    secondHeadId: houses[2].headPersonId,
-    firstHeadHouseId: houses[1].id,
-    secondHeadHouseId: houses[2].id,
-    rulingHouseId: houses[0].id,
+    rulerId: rulerActor.person_id,
+    rhcId: rhcActor.person_id,
+    firstHeadId: nonRuling[0].headPersonId,
+    secondHeadId: nonRuling[1].headPersonId,
+    firstHeadHouseId: nonRuling[0].id,
+    secondHeadHouseId: nonRuling[1].id,
+    rulingHouseId: rulingHouse.id,
     directId: realm01.claims.find((c) => c.kind === 'direct').personId,
     restoredId: realm01.claims.find((c) => c.kind === 'restored').personId,
     restoredHouseId: realm01.claims.find((c) => c.kind === 'restored').houseId,
@@ -355,6 +362,27 @@ try {
     /비공개 · 확인됨/.test(rulerText) && /같은 평의회 자리/.test(rulerText),
     rulerText.slice(0, 240),
   );
+  check(
+    'ruler-not-unverified',
+    !/비공개 · 미확인/.test(rulerText) && !/소문/.test(rulerText),
+    rulerText.slice(0, 240),
+  );
+
+  await cdp.eval(`document.querySelector('[data-house-id="${actors.rulingHouseId}"]')?.click()`);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('[data-person-id="${actors.rhcId}"]')?.click()`);
+  await sleep(150);
+  const rhcText = await cdp.eval(`document.querySelector('#person-detail')?.innerText || ''`);
+  check(
+    'rhc-confirmed-conflict',
+    /비공개 · 확인됨/.test(rhcText) && /같은 평의회 자리/.test(rhcText),
+    rhcText.slice(0, 240),
+  );
+  check(
+    'rhc-not-unverified',
+    !/비공개 · 미확인/.test(rhcText) && !/소문/.test(rhcText),
+    rhcText.slice(0, 240),
+  );
 
   await cdp.eval(`document.querySelector('[data-house-id="${actors.firstHeadHouseId}"]')?.click()`);
   await sleep(150);
@@ -364,6 +392,11 @@ try {
   check(
     'first-head-unverified',
     /비공개 · 미확인/.test(rumorText) && /소문/.test(rumorText),
+    rumorText.slice(0, 240),
+  );
+  check(
+    'first-head-not-confirmed',
+    !/같은 평의회 자리를 두 가문/.test(rumorText) && !/비공개 · 확인됨/.test(rumorText),
     rumorText.slice(0, 240),
   );
 
@@ -385,6 +418,12 @@ try {
     `document.querySelector('.house-card.is-selected')?.getAttribute('data-house-id')`,
   );
   check('keyboard-house', afterHouseKey === actors.rulingHouseId, afterHouseKey);
+  const afterHouseFocus = await cdp.eval(`document.activeElement?.getAttribute('data-house-id')`);
+  check('keyboard-house-focus', afterHouseFocus === actors.rulingHouseId, afterHouseFocus);
+  const houseSelectedMark = await cdp.eval(
+    `document.querySelector('.house-card.is-selected .selection-mark')?.textContent.trim()`,
+  );
+  check('house-selection-mark', houseSelectedMark === '선택됨', houseSelectedMark);
 
   await cdp.eval(`document.querySelector('[data-person-id="${actors.rulerId}"]')?.focus()`);
   await cdp.key(' ', 'Space', 32);
@@ -393,6 +432,22 @@ try {
     `document.querySelector('.person-card.is-selected')?.getAttribute('data-person-id')`,
   );
   check('keyboard-person', afterPersonKey === actors.rulerId, afterPersonKey);
+  const afterPersonFocus = await cdp.eval(`document.activeElement?.getAttribute('data-person-id')`);
+  check('keyboard-person-focus', afterPersonFocus === actors.rulerId, afterPersonFocus);
+  const personSelectedMark = await cdp.eval(
+    `document.querySelector('.person-card.is-selected .selection-mark')?.textContent.trim()`,
+  );
+  check('person-selection-mark', personSelectedMark === '선택됨', personSelectedMark);
+
+  const skipTarget = await cdp.eval(`({
+    tag: document.getElementById('workspace')?.tagName,
+    tabIndex: document.getElementById('workspace')?.tabIndex,
+  })`);
+  check(
+    'skip-target',
+    skipTarget.tag === 'MAIN' && skipTarget.tabIndex === -1,
+    JSON.stringify(skipTarget),
+  );
 
   await cdp.eval(`document.querySelector('[data-territory-id="${otherCapital}"]')?.focus()`);
   await cdp.key('Enter', 'Enter', 13);
@@ -401,6 +456,10 @@ try {
     `document.querySelector('.territory-tile.is-selected')?.getAttribute('data-territory-id')`,
   );
   check('keyboard-territory', afterTileKey === otherCapital, afterTileKey);
+  const afterTileFocus = await cdp.eval(
+    `document.activeElement?.getAttribute('data-territory-id')`,
+  );
+  check('keyboard-territory-focus', afterTileFocus === otherCapital, afterTileFocus);
 
   async function measure(w, h) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {

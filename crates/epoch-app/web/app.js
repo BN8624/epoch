@@ -146,10 +146,13 @@ function renderHouses(idx, state) {
         data-house-id="${escapeHtml(house.id)}"
         aria-pressed="${selected ? 'true' : 'false'}"
         aria-label="${escapeHtml(
-          `${house.name}, 수장 ${house.headName}${house.ruling ? ', 통치 가문' : ''}`,
+          `${house.name}, 수장 ${house.headName}${house.ruling ? ', 통치 가문' : ''}${selected ? ', 선택됨' : ''}`,
         )}"
       >
-        <div class="card-name">${escapeHtml(house.name)}</div>
+        <div class="card-head">
+          <div class="card-name">${escapeHtml(house.name)}</div>
+          ${selected ? '<span class="selection-mark">선택됨</span>' : ''}
+        </div>
         <div class="card-meta">수장 ${escapeHtml(house.headName)}</div>
         <div class="card-meta">거점 ${escapeHtml(house.seatLabel)}</div>
         <div class="card-meta">${escapeHtml(house.cultureName)} · ${escapeHtml(house.religionName)}</div>
@@ -207,9 +210,14 @@ function renderPersons(idx, state) {
                 class="person-card${selected ? ' is-selected' : ''}"
                 data-person-id="${escapeHtml(person.id)}"
                 aria-pressed="${selected ? 'true' : 'false'}"
-                aria-label="${escapeHtml(`${person.name}, ${person.generationLabel}`)}"
+                aria-label="${escapeHtml(
+                  `${person.name}, ${person.generationLabel}${selected ? ', 선택됨' : ''}`,
+                )}"
               >
-                <div class="card-name">${escapeHtml(person.name)}</div>
+                <div class="card-head">
+                  <div class="card-name">${escapeHtml(person.name)}</div>
+                  ${selected ? '<span class="selection-mark">선택됨</span>' : ''}
+                </div>
                 <div class="card-meta">${escapeHtml(person.generationLabel)}</div>
                 <div class="card-meta">${escapeHtml(person.activityLabel)}</div>
                 ${badgesHtml(person.badges)}
@@ -292,9 +300,31 @@ const observer = {
   state: null,
 };
 
+function attrSelector(name, value) {
+  return `[${name}="${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`;
+}
+
+function focusRestoreSelector(el) {
+  if (!(el instanceof HTMLElement)) return null;
+  if (el.dataset.territoryId) {
+    return `.territory-tile${attrSelector('data-territory-id', el.dataset.territoryId)}`;
+  }
+  if (el.dataset.houseId) {
+    return `.house-card${attrSelector('data-house-id', el.dataset.houseId)}`;
+  }
+  if (el.dataset.personId) {
+    return `.person-card${attrSelector('data-person-id', el.dataset.personId)}`;
+  }
+  return null;
+}
+
 function applySelection(next) {
+  const restore = focusRestoreSelector(document.activeElement);
   observer.state = next;
   renderAll();
+  if (restore) {
+    document.querySelector(restore)?.focus();
+  }
   return observer.state;
 }
 
