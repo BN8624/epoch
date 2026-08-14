@@ -2,10 +2,11 @@
 
 use epoch_core::{
     ActiveRole, ClaimBasis, ClaimStanding, GenerationBand, create_demo_checkpoint,
-    generate_context_world, generate_dynastic_world, generate_political_world,
-    generate_rights_world, generate_world, load_runtime_from_bytes, run_demo, run_demo_to_runtime,
-    save_runtime_to_bytes, validate_initial_context, validate_initial_rights,
-    validate_political_roster, validate_population, validate_world,
+    generate_context_world, generate_dynastic_world, generate_family_world,
+    generate_political_world, generate_rights_world, generate_world, load_runtime_from_bytes,
+    run_demo, run_demo_to_runtime, save_runtime_to_bytes, validate_initial_context,
+    validate_initial_family, validate_initial_rights, validate_political_roster,
+    validate_population, validate_world,
 };
 use std::env;
 use std::fs;
@@ -38,6 +39,8 @@ fn main() -> ExitCode {
         "context-check" => cmd_context_check(&args),
         "rights" => cmd_rights(&args),
         "rights-check" => cmd_rights_check(&args),
+        "family" => cmd_family(&args),
+        "family-check" => cmd_family_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -66,6 +69,8 @@ Usage:
   cargo run -p epoch-lab -- context-check <seed>
   cargo run -p epoch-lab -- rights <seed>
   cargo run -p epoch-lab -- rights-check <seed>
+  cargo run -p epoch-lab -- family <seed>
+  cargo run -p epoch-lab -- family-check <seed>
 
 Commands:
   help              Show this help
@@ -82,6 +87,8 @@ Commands:
   context-check     Generate twice, verify determinism and context invariants
   rights            Generate rights world and print pretty JSON
   rights-check      Generate twice, verify determinism and rights invariants
+  family            Generate family world and print pretty JSON
+  family-check      Generate twice, verify determinism and family invariants
 "
     );
 }
@@ -104,6 +111,8 @@ Usage:
   cargo run -p epoch-lab -- context-check <seed>
   cargo run -p epoch-lab -- rights <seed>
   cargo run -p epoch-lab -- rights-check <seed>
+  cargo run -p epoch-lab -- family <seed>
+  cargo run -p epoch-lab -- family-check <seed>
 "
     );
 }
@@ -685,6 +694,177 @@ fn cmd_rights_check(args: &[String]) -> ExitCode {
         a.rights.realms.len(),
         a.rights.claims.len(),
         a.rights.evidence_records.len(),
+        bytes_a.len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_family(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_family_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize family world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: family world generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_family_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_family_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_family_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first family world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second family world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_world(&a.rights_world.context_world.political.dynastic.world) {
+        eprintln!("error: world invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_population(
+        &a.rights_world.context_world.political.dynastic.world,
+        &a.rights_world.context_world.political.dynastic.population,
+    ) {
+        eprintln!("error: population invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_political_roster(
+        &a.rights_world.context_world.political.dynastic,
+        &a.rights_world.context_world.political.roster,
+    ) {
+        eprintln!("error: political roster invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_initial_context(
+        &a.rights_world.context_world.political,
+        &a.rights_world.context_world.context,
+    ) {
+        eprintln!("error: context invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_initial_rights(&a.rights_world.context_world, &a.rights_world.rights) {
+        eprintln!("error: rights invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+    if let Err(e) = validate_initial_family(&a.rights_world, &a.family) {
+        eprintln!("error: family invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    let identities: std::collections::BTreeMap<&str, &epoch_core::PersonIdentity> = a
+        .rights_world
+        .context_world
+        .context
+        .person_identities
+        .iter()
+        .map(|p| (p.person_id.as_str(), p))
+        .collect();
+    let mut interfaith = 0usize;
+    let mut intercultural = 0usize;
+    for marriage in &a.family.marriages {
+        let left_id = match marriage.spouse_person_ids.first() {
+            Some(id) => id.as_str(),
+            None => {
+                eprintln!("error: marriage {} missing spouse 0", marriage.id);
+                return ExitCode::from(1);
+            }
+        };
+        let right_id = match marriage.spouse_person_ids.get(1) {
+            Some(id) => id.as_str(),
+            None => {
+                eprintln!("error: marriage {} missing spouse 1", marriage.id);
+                return ExitCode::from(1);
+            }
+        };
+        let left = match identities.get(left_id) {
+            Some(id) => *id,
+            None => {
+                eprintln!("error: missing identity {left_id}");
+                return ExitCode::from(1);
+            }
+        };
+        let right = match identities.get(right_id) {
+            Some(id) => *id,
+            None => {
+                eprintln!("error: missing identity {right_id}");
+                return ExitCode::from(1);
+            }
+        };
+        if left.culture_id == right.culture_id && left.religion_id != right.religion_id {
+            interfaith += 1;
+        } else if left.culture_id != right.culture_id && left.religion_id == right.religion_id {
+            intercultural += 1;
+        }
+    }
+    let dual_parent_children = a.family.parentages.len();
+
+    println!(
+        "FAMILY_OK seed={seed} marriages={} parentages={} interfaith={interfaith} intercultural={intercultural} dual_parent_children={dual_parent_children} bytes={}",
+        a.family.marriages.len(),
+        a.family.parentages.len(),
         bytes_a.len()
     );
     ExitCode::SUCCESS
