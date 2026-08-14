@@ -2,7 +2,7 @@
 
 use epoch_core::{
     ActiveRole, CONTEXT_WORLD_SCHEMA_VERSION, ClaimBasis, CoreError, DYNASTIC_WORLD_SCHEMA_VERSION,
-    FAMILY_WORLD_SCHEMA_VERSION, GenerationBand, InitialFamilyNetwork, MARRIAGE_COUNT,
+    FAMILY_WORLD_SCHEMA_VERSION, FamilyWorld, GenerationBand, InitialFamilyNetwork, MARRIAGE_COUNT,
     PARENTAGE_COUNT, POLITICAL_WORLD_SCHEMA_VERSION, RIGHTS_WORLD_SCHEMA_VERSION,
     SAVE_SCHEMA_VERSION, WORLD_SCHEMA_VERSION, derive_initial_family, effective_parent_ids,
     generate_dynastic_world, generate_family_world, generate_rights_world, validate_initial_family,
@@ -821,52 +821,37 @@ fn cli_family_1_succeeds() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"schema_version\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"rights_world\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"family\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"marriages\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"parentages\""), "stdout: {stdout}");
-    assert!(stdout.contains("marriage-01"), "stdout: {stdout}");
-    assert!(stdout.contains("parentage-01"), "stdout: {stdout}");
+    let stdout = String::from_utf8(output.stdout).expect("family stdout utf-8");
+    let world: FamilyWorld =
+        serde_json::from_str(stdout.trim()).expect("family stdout must be FamilyWorld JSON");
+    assert_eq!(world.schema_version, FAMILY_WORLD_SCHEMA_VERSION);
+    assert_eq!(world.seed, 1);
+    assert_eq!(world.family.marriages.len(), MARRIAGE_COUNT);
+    assert_eq!(world.family.parentages.len(), PARENTAGE_COUNT);
+    assert_eq!(world.family.marriages[0].id, "marriage-01");
+    assert_eq!(world.family.parentages[0].id, "parentage-01");
+    assert_eq!(world, generate_family_world(1).expect("expected family"));
 }
 
 #[test]
 fn cli_family_check_1_and_2_print_family_ok() {
-    for seed in ["1", "2"] {
-        let output = run_epoch_lab(&["family-check", seed]);
+    for seed in [1u64, 2] {
+        let output = run_epoch_lab(&["family-check", &seed.to_string()]);
         assert!(
             output.status.success(),
             "seed={seed} stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("FAMILY_OK"), "seed={seed} stdout: {stdout}");
-        assert!(
-            stdout.contains(&format!("seed={seed}")),
-            "seed={seed} stdout: {stdout}"
+        let expected_bytes = generate_family_world(seed)
+            .expect("family")
+            .to_compact_json_bytes()
+            .expect("family bytes")
+            .len();
+        let expected = format!(
+            "FAMILY_OK seed={seed} marriages=12 parentages=12 interfaith=6 intercultural=6 dual_parent_children=12 bytes={expected_bytes}"
         );
-        assert!(
-            stdout.contains("marriages=12"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("parentages=12"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("interfaith=6"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("intercultural=6"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(
-            stdout.contains("dual_parent_children=12"),
-            "seed={seed} stdout: {stdout}"
-        );
-        assert!(stdout.contains("bytes="), "seed={seed} stdout: {stdout}");
+        assert_eq!(stdout.trim(), expected, "seed={seed}");
     }
 }
 
