@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EPOCH 세계 관찰</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">본문으로 건너뛰기</a>
+
+    <div class="page">
+      <header class="summary" aria-label="세계 요약">
+        <p class="eyebrow">EPOCH</p>
+        <h1>세계 관찰</h1>
+        <p id="world-seed" class="summary-seed"></p>
+        <ul id="world-stats" class="summary-stats"></ul>
+      </header>
+
+      <main id="workspace" class="workspace" tabindex="-1">
+        <section class="panel map-panel" aria-labelledby="map-heading">
+          <div class="section-head">
+            <h2 id="map-heading">지도</h2>
+            <p class="section-help">영지를 선택하면 해당 Realm이 열립니다.</p>
+          </div>
+          <div
+            id="world-map"
+            class="map-grid"
+            role="group"
+            aria-label="6칸 곱하기 6칸 영지 지도"
+          ></div>
+        </section>
+
+        <div class="detail-column">
+          <section class="panel" aria-labelledby="realm-heading">
+            <div class="section-head">
+              <h2 id="realm-heading">Realm</h2>
+            </div>
+            <div id="realm-detail" class="realm-detail"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="houses-heading">
+            <div class="section-head">
+              <h2 id="houses-heading">가문</h2>
+              <p class="section-help">가문을 선택하면 구성원과 관계를 볼 수 있습니다.</p>
+            </div>
+            <div id="house-list" class="house-list"></div>
+            <div id="house-relations" class="house-relations"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="persons-heading">
+            <div class="section-head">
+              <h2 id="persons-heading">인물</h2>
+              <p class="section-help">인물을 선택하면 권리와 그 인물이 아는 정보만 표시됩니다.</p>
+            </div>
+            <div id="person-list" class="person-list"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="person-detail-heading">
+            <div class="section-head">
+              <h2 id="person-detail-heading">선택한 인물</h2>
+            </div>
+            <div id="person-detail" class="person-detail" aria-live="polite"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
