@@ -67,26 +67,49 @@ function rewardPhrase(rewardKey, realmName) {
   return `${realmName}에 대한 약속된 보상`;
 }
 
-function claimProjection(claim, personById) {
-  const person = personById[claim.claimant_person_id];
-  if (claim.basis === 'direct_descent') {
-    return {
-      id: claim.id,
-      kind: 'direct',
-      title: '직계 권리자',
-      standingLabel: '강한 직계 권리',
-      evidenceLabel: '현 통치자의 알려진 자녀',
-      personId: claim.claimant_person_id,
-      personName: person?.name ?? claim.claimant_person_id,
-      houseId: claim.claimant_house_id,
-    };
+function standingWord(standing) {
+  if (standing === 'strong') return '강한';
+  if (standing === 'contested') return '논쟁 중인';
+  return null;
+}
+
+function claimKindFromBasis(basis) {
+  if (basis === 'direct_descent') {
+    return { kind: 'direct', title: '직계 권리자', noun: '직계 권리' };
   }
+  if (basis === 'restored_line_record') {
+    return { kind: 'restored', title: '복권 권리자', noun: '복권 권리' };
+  }
+  return { kind: basis, title: '계승 권리', noun: '계승 권리' };
+}
+
+function claimEvidenceLabel(claim, evidenceById) {
+  if (claim.basis === 'direct_descent') {
+    return '현 통치자의 알려진 자녀';
+  }
+  const records = (claim.evidence_record_ids ?? [])
+    .map((id) => evidenceById?.[id])
+    .filter(Boolean);
+  if (records.some((record) => record.kind === 'restored_lineage')) {
+    return '옛 계통을 뒷받침하는 역사 기록 보유';
+  }
+  if (records.length > 0) {
+    return '연결된 역사 기록';
+  }
+  return '연결된 역사 기록 없음';
+}
+
+function claimProjection(claim, idx) {
+  const person = idx.personById[claim.claimant_person_id];
+  const kindInfo = claimKindFromBasis(claim.basis);
+  const strength = standingWord(claim.standing);
   return {
     id: claim.id,
-    kind: 'restored',
-    title: '복권 권리자',
-    standingLabel: '논쟁 중인 복권 권리',
-    evidenceLabel: '복권 계통 역사 기록',
+    kind: kindInfo.kind,
+    title: kindInfo.title,
+    standing: claim.standing,
+    standingLabel: strength ? `${strength} ${kindInfo.noun}` : kindInfo.noun,
+    evidenceLabel: claimEvidenceLabel(claim, idx.evidenceById),
     personId: claim.claimant_person_id,
     personName: person?.name ?? claim.claimant_person_id,
     houseId: claim.claimant_house_id,
@@ -131,6 +154,7 @@ export function buildIndexes(world) {
   const personIdentityById = byId(layers.context.person_identities, 'person_id');
   const rightsByRealm = byId(layers.rights.realms, 'realm_id');
   const claimById = byId(layers.rights.claims);
+  const evidenceById = byId(layers.rights.evidence_records);
 
   const rulerPersonByRealm = Object.create(null);
   for (const link of layers.population.ruler_links) {
@@ -174,6 +198,7 @@ export function buildIndexes(world) {
     personIdentityById,
     rightsByRealm,
     claimById,
+    evidenceById,
     rulerPersonByRealm,
     activeByPerson,
     supporting,
@@ -216,27 +241,34 @@ export function getMapTiles(idx) {
   });
 }
 
+export function rulingHouseIdForRealm(idx, realmId) {
+  const incumbentId =
+    idx.rightsByRealm[realmId]?.incumbent_person_id ?? idx.rulerPersonByRealm[realmId];
+  return idx.personById[incumbentId]?.house_id ?? null;
+}
+
 export function getInitialSelection(idx) {
   const realms = [...idx.layers.skeleton.realms].sort((a, b) => a.id.localeCompare(b.id));
   const realm = realms[0];
-  const houses = idx.housesByRealm[realm.id] ?? [];
-  const ruling = houses[0];
+  const houses = housesForRealm(idx, realm.id);
+  const ruling = houses.find((house) => house.ruling) ?? houses[0];
   const rights = idx.rightsByRealm[realm.id];
   return {
     selectedTerritoryId: realm.capital_territory_id,
     selectedRealmId: realm.id,
     selectedHouseId: ruling?.id ?? null,
-    selectedPersonId: rights?.incumbent_person_id ?? ruling?.head_person_id ?? null,
+    selectedPersonId: rights?.incumbent_person_id ?? ruling?.headPersonId ?? null,
   };
 }
 
 export function housesForRealm(idx, realmId) {
   const realmIdentity = idx.realmIdentityById[realmId];
-  return (idx.housesByRealm[realmId] ?? []).map((house, index) => {
+  const rulingHouseId = rulingHouseIdForRealm(idx, realmId);
+  return (idx.housesByRealm[realmId] ?? []).map((house) => {
     const identity = idx.houseIdentityById[house.id];
     const head = idx.personById[house.head_person_id];
     const seat = idx.territoryById[house.seat_territory_id];
-    const ruling = index === 0;
+    const ruling = house.id === rulingHouseId;
     return {
       id: house.id,
       name: house.name,
@@ -338,9 +370,7 @@ export function membersForHouse(idx, houseId) {
 }
 
 export function getClaimsForPerson(idx, personId) {
-  return (idx.claimsByPerson[personId] ?? []).map((claim) =>
-    claimProjection(claim, idx.personById),
-  );
+  return (idx.claimsByPerson[personId] ?? []).map((claim) => claimProjection(claim, idx));
 }
 
 export function getVisiblePromises(idx, personId) {
@@ -382,9 +412,7 @@ export function getRealmView(idx, realmId) {
   const incumbentId = rights?.incumbent_person_id;
   const incumbent = idx.personById[incumbentId];
   const identity = idx.realmIdentityById[realmId];
-  const claims = (idx.claimsByRealm[realmId] ?? []).map((claim) =>
-    claimProjection(claim, idx.personById),
-  );
+  const claims = (idx.claimsByRealm[realmId] ?? []).map((claim) => claimProjection(claim, idx));
   const houses = housesForRealm(idx, realmId);
   return {
     id: realm.id,
@@ -453,12 +481,13 @@ export function selectionAfterTerritory(idx, territoryId, current) {
     return { ...current, selectedTerritoryId: territoryId };
   }
   const houses = housesForRealm(idx, territory.realm_id);
+  const ruling = houses.find((house) => house.ruling) ?? houses[0];
   const rights = idx.rightsByRealm[territory.realm_id];
   return {
     selectedTerritoryId: territoryId,
     selectedRealmId: territory.realm_id,
-    selectedHouseId: houses[0]?.id ?? null,
-    selectedPersonId: rights?.incumbent_person_id ?? houses[0]?.headPersonId ?? null,
+    selectedHouseId: ruling?.id ?? null,
+    selectedPersonId: rights?.incumbent_person_id ?? ruling?.headPersonId ?? null,
   };
 }
 
