@@ -64,6 +64,8 @@ pub enum CoreError {
     InvalidRights(String),
     /// 초기 혼인·혈통망 생성·검증 불변식 위반 (fail closed).
     InvalidFamily(String),
+    /// 1세대 권리 전파 생성·검증 불변식 위반 (fail closed).
+    InvalidClaimPropagation(String),
 }
 
 impl fmt::Display for CoreError {
@@ -122,6 +124,9 @@ impl fmt::Display for CoreError {
             CoreError::InvalidContext(msg) => write!(f, "invalid context: {msg}"),
             CoreError::InvalidRights(msg) => write!(f, "invalid rights: {msg}"),
             CoreError::InvalidFamily(msg) => write!(f, "invalid family: {msg}"),
+            CoreError::InvalidClaimPropagation(msg) => {
+                write!(f, "invalid claim propagation: {msg}")
+            }
         }
     }
 }

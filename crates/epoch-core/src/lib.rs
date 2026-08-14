@@ -1,5 +1,7 @@
 // EPOCH 결정론 코어 — 명령·스케줄·사건 재생 계약
 
+pub mod claim_propagation;
+pub mod claim_propagation_gen;
 pub mod command;
 pub mod context;
 pub mod contextgen;
@@ -22,6 +24,14 @@ pub mod scheduler;
 pub mod world;
 pub mod worldgen;
 
+pub use claim_propagation::{
+    CLAIM_PROPAGATION_WORLD_SCHEMA_VERSION, ClaimPropagationWorld, DERIVED_CLAIM_COUNT,
+    DERIVED_GENERATION_DISTANCE, DerivedSuccessionClaim, InitialClaimPropagation,
+};
+pub use claim_propagation_gen::{
+    derive_initial_claim_propagation, generate_claim_propagation_world,
+    validate_initial_claim_propagation,
+};
 pub use command::{
     Command, CommandEnvelope, EXPOSE_DUPLICATE_PROMISE, SubmitSpec, execute_command, submit_command,
 };

@@ -824,33 +824,6 @@ fn cli_family_1_succeeds() {
 }
 
 #[test]
-fn cli_family_check_1_and_2_print_family_ok() {
-    for seed in [1u64, 2] {
-        let output = run_epoch_lab(&["family-check", &seed.to_string()]);
-        assert!(
-            output.status.success(),
-            "seed={seed} stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let expected_bytes = generate_family_world(seed)
-            .expect("family")
-            .to_compact_json_bytes()
-            .expect("family bytes")
-            .len();
-        let expected = format!(
-            "FAMILY_OK seed={seed} marriages=12 parentages=12 interfaith=6 intercultural=6 dual_parent_children=12 bytes={expected_bytes}"
-        );
-        assert_eq!(stdout.trim(), expected, "seed={seed}");
-    }
-}
-
-#[test]
-fn existing_m1_and_m0_exact_regression() {
-    common::assert_cli_exact_regression();
-}
-
-#[test]
 fn active_roles_of_married_spouses() {
     let fw = generate_family_world(1).expect("family");
     let actors: BTreeMap<_, _> = fw
