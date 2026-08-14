@@ -11,6 +11,8 @@ pub mod political;
 pub mod politicalgen;
 pub mod population;
 pub mod populationgen;
+pub mod rights;
+pub mod rightsgen;
 pub mod rng;
 pub mod runtime;
 pub mod save;
@@ -50,6 +52,12 @@ pub use population::{
 };
 // population::House is available as epoch_core::population::House (avoids clash with model::House)
 pub use populationgen::{generate_dynastic_world, generate_population, validate_population};
+pub use rights::{
+    ClaimBasis, ClaimStanding, InitialRights, REALM_RIGHTS_COUNT, RIGHT_EVIDENCE_COUNT,
+    RIGHTS_WORLD_SCHEMA_VERSION, RealmRights, RightEvidenceKind, RightEvidenceRecord, RightsWorld,
+    SUCCESSION_CLAIM_COUNT, SuccessionClaim,
+};
+pub use rightsgen::{derive_initial_rights, generate_rights_world, validate_initial_rights};
 pub use rng::DeterministicRng;
 pub use runtime::RuntimeState;
 pub use save::{SAVE_SCHEMA_VERSION, SaveEnvelope, load_runtime_from_bytes, save_runtime_to_bytes};
