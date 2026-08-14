@@ -1,0 +1,414 @@
+/* 생성 세계 관찰 화면 — 지도 우선 읽기 전용 레이아웃 */
+
+:root {
+  --bg: #10141c;
+  --bg-panel: #181e29;
+  --bg-inset: #131822;
+  --bg-card: #222a38;
+  --bg-card-hover: #2b3446;
+  --border: #3b4458;
+  --border-strong: #d4b056;
+  --text: #ece8e1;
+  --text-muted: #aeb5c4;
+  --text-dim: #7f8798;
+  --accent: #d4b056;
+  --accent-soft: rgba(212, 176, 86, 0.16);
+  --focus: #f0de9a;
+  --selected-ring: #f3d98a;
+  --radius: 10px;
+  --touch-min: 44px;
+  --font: "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  --realm-1: #35557a;
+  --realm-2: #5d4574;
+  --realm-3: #2b6658;
+  --realm-4: #7d5336;
+  --realm-5: #3f5f8f;
+  --realm-6: #6a4548;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text);
+  background:
+    radial-gradient(ellipse 110% 70% at 20% -10%, #243044 0%, transparent 55%),
+    var(--bg);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.4rem;
+  line-height: 1.25;
+  font-weight: 650;
+}
+
+h1 {
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+p {
+  margin: 0 0 0.55rem;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  text-align: left;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.7rem 1rem;
+  background: var(--accent);
+  color: #1a1408;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+}
+
+.page {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0.85rem 0.85rem 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.summary {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.summary-seed {
+  margin: 0 0 0.45rem;
+  color: var(--text-muted);
+}
+
+.summary-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.summary-stats li {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.92rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+  min-width: 0;
+}
+
+.detail-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.section-head {
+  margin-bottom: 0.65rem;
+}
+
+.section-help {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+
+.map-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.territory-tile {
+  position: relative;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 0.15rem;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
+  color: #f4f1ea;
+}
+
+.territory-tile .tile-code,
+.territory-tile .tile-mark {
+  pointer-events: none;
+  line-height: 1.1;
+}
+
+.territory-tile .tile-code {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.territory-tile .tile-mark {
+  font-size: 0.85rem;
+}
+
+.territory-tile.realm-1 { background: var(--realm-1); }
+.territory-tile.realm-2 { background: var(--realm-2); }
+.territory-tile.realm-3 { background: var(--realm-3); }
+.territory-tile.realm-4 { background: var(--realm-4); }
+.territory-tile.realm-5 { background: var(--realm-5); }
+.territory-tile.realm-6 { background: var(--realm-6); }
+
+.territory-tile.in-selected-realm {
+  box-shadow: inset 0 0 0 1px rgba(243, 217, 138, 0.55);
+}
+
+.territory-tile.is-selected {
+  border-color: var(--selected-ring);
+  box-shadow: 0 0 0 2px var(--selected-ring);
+}
+
+.territory-tile.is-selected::after {
+  content: "선택됨";
+  position: absolute;
+  left: 2px;
+  bottom: 1px;
+  font-size: 0.58rem;
+  letter-spacing: 0;
+  color: #fff7d6;
+  text-shadow: 0 0 4px #000;
+}
+
+.fact-list {
+  display: grid;
+  grid-template-columns: minmax(5.2rem, 7rem) minmax(0, 1fr);
+  gap: 0.25rem 0.6rem;
+  margin: 0 0 0.75rem;
+}
+
+.fact-list dt {
+  color: var(--text-dim);
+  font-size: 0.88rem;
+}
+
+.fact-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.aux-id {
+  display: block;
+  margin-top: 0.1rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.claim-list,
+.relation-list,
+.info-list,
+.promise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claim-card,
+.relation-card,
+.info-card,
+.promise-card,
+.empty-note {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.claim-card h3,
+.info-card h3 {
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.house-list,
+.person-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.house-card,
+.person-card {
+  width: 100%;
+  min-height: var(--touch-min);
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.house-card:hover,
+.person-card:hover,
+.territory-tile:hover {
+  filter: brightness(1.06);
+}
+
+.house-card.is-selected,
+.person-card.is-selected {
+  border-color: var(--selected-ring);
+  background: var(--accent-soft);
+}
+
+.card-name {
+  font-weight: 700;
+}
+
+.card-meta {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+
+.badge-ruling,
+.badge-ruler {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.person-group + .person-group {
+  margin-top: 0.75rem;
+}
+
+.person-group h3 {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.load-error {
+  padding: 1rem;
+  color: #f0c7c7;
+}
+
+@media (max-width: 860px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .territory-tile.is-selected::after {
+    font-size: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  body {
+    font-size: 15px;
+  }
+
+  .page {
+    padding: 0.65rem 0.55rem 1.2rem;
+  }
+
+  .map-grid {
+    gap: 2px;
+  }
+
+  .territory-tile {
+    padding: 0.08rem;
+  }
+
+  .territory-tile .tile-code {
+    font-size: 0.7rem;
+  }
+
+  .fact-list {
+    grid-template-columns: minmax(4.6rem, 6.2rem) minmax(0, 1fr);
+  }
+}

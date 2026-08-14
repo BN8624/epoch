@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/epoch-core",
+    "crates/epoch-app",
     "crates/epoch-lab",
 ]
 
