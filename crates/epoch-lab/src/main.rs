@@ -1,12 +1,13 @@
 // EPOCH lab CLI — demo 및 결정론 재생·저장 검사
 
 use epoch_core::{
-    ActiveRole, ClaimBasis, ClaimStanding, GenerationBand, create_demo_checkpoint,
-    generate_claim_propagation_world, generate_context_world, generate_dynastic_world,
-    generate_family_world, generate_political_world, generate_rights_world, generate_world,
-    load_runtime_from_bytes, run_demo, run_demo_to_runtime, save_runtime_to_bytes,
-    validate_initial_claim_propagation, validate_initial_context, validate_initial_family,
-    validate_initial_rights, validate_political_roster, validate_population, validate_world,
+    ActiveRole, ClaimBasis, ClaimStanding, GenerationBand, SuccessionPriority,
+    create_demo_checkpoint, generate_claim_propagation_world, generate_context_world,
+    generate_dynastic_world, generate_family_world, generate_political_world,
+    generate_rights_world, generate_succession_world, generate_world, load_runtime_from_bytes,
+    run_demo, run_demo_to_runtime, save_runtime_to_bytes, validate_initial_claim_propagation,
+    validate_initial_context, validate_initial_family, validate_initial_rights,
+    validate_political_roster, validate_population, validate_succession_transition, validate_world,
 };
 use std::env;
 use std::fs;
@@ -43,6 +44,8 @@ fn main() -> ExitCode {
         "family-check" => cmd_family_check(&args),
         "claim-propagation" => cmd_claim_propagation(&args),
         "claim-propagation-check" => cmd_claim_propagation_check(&args),
+        "succession" => cmd_succession(&args),
+        "succession-check" => cmd_succession_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -75,6 +78,8 @@ Usage:
   cargo run -p epoch-lab -- family-check <seed>
   cargo run -p epoch-lab -- claim-propagation <seed>
   cargo run -p epoch-lab -- claim-propagation-check <seed>
+  cargo run -p epoch-lab -- succession <seed> <realm-id>
+  cargo run -p epoch-lab -- succession-check <seed>
 
 Commands:
   help              Show this help
@@ -95,6 +100,8 @@ Commands:
   family-check      Generate twice, verify determinism and family invariants
   claim-propagation Generate claim-propagation world and print pretty JSON
   claim-propagation-check  Generate twice, verify determinism and derived-claim invariants
+  succession        Generate succession world for one realm and print pretty JSON
+  succession-check  Independently verify all six realms for one seed
 "
     );
 }
@@ -121,8 +128,27 @@ Usage:
   cargo run -p epoch-lab -- family-check <seed>
   cargo run -p epoch-lab -- claim-propagation <seed>
   cargo run -p epoch-lab -- claim-propagation-check <seed>
+  cargo run -p epoch-lab -- succession <seed> <realm-id>
+  cargo run -p epoch-lab -- succession-check <seed>
 "
     );
+}
+
+fn parse_seed_and_realm(args: &[String]) -> Result<(u64, String), String> {
+    match args {
+        [] => Err("missing seed and realm id".to_string()),
+        [_] => Err("missing realm id".to_string()),
+        [seed, realm] => {
+            let seed = seed
+                .parse::<u64>()
+                .map_err(|_| format!("invalid seed '{seed}': expected unsigned 64-bit integer"))?;
+            if realm.is_empty() {
+                return Err("realm id must not be empty".to_string());
+            }
+            Ok((seed, realm.clone()))
+        }
+        _ => Err("too many arguments: expected succession <seed> <realm-id>".to_string()),
+    }
 }
 
 fn parse_seed(args: &[String]) -> Result<u64, String> {
@@ -1014,6 +1040,173 @@ fn cmd_claim_propagation_check(args: &[String]) -> ExitCode {
     println!(
         "CLAIM_PROPAGATION_OK seed={seed} original={original} derived={derived} restored_sources={restored_sources} direct_sources={direct_sources} distance1={distance1} derived_supporting={derived_supporting} bytes={}",
         bytes_a.len()
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_succession(args: &[String]) -> ExitCode {
+    let (seed, realm_id) = match parse_seed_and_realm(args) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_succession_world(seed, &realm_id) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize succession world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: succession generation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_succession_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let probe = match generate_succession_world(seed, "realm-01") {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let realm_ids: Vec<String> = probe
+        .pre_succession_world
+        .family_world
+        .rights_world
+        .rights
+        .realms
+        .iter()
+        .map(|r| r.realm_id.clone())
+        .collect();
+    if realm_ids.len() != 6 {
+        eprintln!("error: expected 6 realms, got {}", realm_ids.len());
+        return ExitCode::from(1);
+    }
+
+    let mut realms = 0usize;
+    let mut candidates = 0usize;
+    let mut direct_winners = 0usize;
+    let mut restored_winners = 0usize;
+    let mut derived_winners = 0usize;
+    let mut vacancies = 0usize;
+
+    for realm_id in &realm_ids {
+        let a = match generate_succession_world(seed, realm_id) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("error: first generate failed for {realm_id}: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        let b = match generate_succession_world(seed, realm_id) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("error: second generate failed for {realm_id}: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        if a != b {
+            eprintln!("error: structure inequality for seed={seed} realm={realm_id}");
+            return ExitCode::from(1);
+        }
+        let bytes_a = match a.to_compact_json_bytes() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: serialize first succession world: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        let bytes_b = match b.to_compact_json_bytes() {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: serialize second succession world: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        if bytes_a != bytes_b {
+            eprintln!(
+                "error: compact JSON bytes differ for seed={seed} realm={realm_id} len_a={} len_b={}",
+                bytes_a.len(),
+                bytes_b.len()
+            );
+            return ExitCode::from(1);
+        }
+        if let Err(e) = validate_succession_transition(&a.pre_succession_world, &a.transition) {
+            eprintln!("error: succession invariants failed for {realm_id}: {e}");
+            return ExitCode::from(1);
+        }
+        if a.seed != seed {
+            eprintln!("error: seed {} != requested {seed}", a.seed);
+            return ExitCode::from(1);
+        }
+        if a.transition.realm_id != *realm_id {
+            eprintln!(
+                "error: transition realm {} != {realm_id}",
+                a.transition.realm_id
+            );
+            return ExitCode::from(1);
+        }
+        realms += 1;
+        candidates += a.transition.candidates.len();
+        if a.transition.vacancy.is_vacant {
+            vacancies += 1;
+        }
+        let winner = match a
+            .transition
+            .candidates
+            .iter()
+            .find(|c| c.person_id == a.transition.presumptive_successor_person_id)
+        {
+            Some(c) => c,
+            None => {
+                eprintln!("error: successor is not a candidate for {realm_id}");
+                return ExitCode::from(1);
+            }
+        };
+        match winner.priority {
+            SuccessionPriority::DirectStrongOriginal => direct_winners += 1,
+            SuccessionPriority::RestoredContestedOriginal => restored_winners += 1,
+            SuccessionPriority::RestoredContestedDerived => derived_winners += 1,
+        }
+    }
+
+    let realm01 = match generate_succession_world(seed, "realm-01") {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: realm-01 generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let realm01_bytes = match realm01.to_compact_json_bytes() {
+        Ok(b) => b.len(),
+        Err(e) => {
+            eprintln!("error: serialize realm-01 succession world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    println!(
+        "SUCCESSION_OK seed={seed} realms={realms} candidates={candidates} direct_winners={direct_winners} restored_winners={restored_winners} derived_winners={derived_winners} vacancies={vacancies} realm01_bytes={realm01_bytes}"
     );
     ExitCode::SUCCESS
 }
