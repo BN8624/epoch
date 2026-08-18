@@ -395,6 +395,33 @@ a:focus-visible {
   color: #f0c7c7;
 }
 
+.crisis-panel .succession-crisis {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.crisis-priority,
+.crisis-competing {
+  min-width: 0;
+}
+
+.crisis-competing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.crisis-candidate {
+  width: 100%;
+  min-height: var(--touch-min);
+}
+
+.crisis-candidate.is-priority {
+  border-color: var(--accent);
+}
+
 @media (max-width: 860px) {
   .workspace {
     grid-template-columns: minmax(0, 1fr);

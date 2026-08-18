@@ -53,6 +53,29 @@ fn cli_export_seed1_prints_ok_line() {
 }
 
 #[test]
+fn cli_export_succession_seed1_prints_ok_line() {
+    let tmp = TempDir::new("succession-ok");
+    let output = bin()
+        .args([
+            "export-succession",
+            "1",
+            "realm-01",
+            tmp.0.to_str().expect("utf8 path"),
+        ])
+        .output()
+        .expect("run export-succession");
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "APP_SUCCESSION_EXPORT_OK seed=1 realm=realm-01 rights_bytes=66222 succession_bytes=71915 files=6"
+    );
+}
+
+#[test]
 fn cli_invalid_seed_fails() {
     let tmp = TempDir::new("bad-seed");
     let output = bin()
