@@ -240,14 +240,6 @@ fn marriage_containing<'a>(
         .expect("marriage")
 }
 
-fn expected_check_line(seed: u64) -> String {
-    let world = generate_claim_propagation_world(seed).expect("world");
-    let bytes = world.to_compact_json_bytes().expect("bytes").len();
-    format!(
-        "CLAIM_PROPAGATION_OK seed={seed} original=12 derived=6 restored_sources=6 direct_sources=0 distance1=6 derived_supporting=6 bytes={bytes}"
-    )
-}
-
 #[test]
 fn counts_sources_and_claimant_shape() {
     for seed in SEEDS {
@@ -919,17 +911,5 @@ fn cli_claim_propagation_1_matches_generated_world() {
     common::assert_cli_json_eq(&["claim-propagation", "1"], &expected);
 }
 
-#[test]
-fn cli_claim_propagation_check_1_and_2_print_exact_ok() {
-    for seed in [1u64, 2] {
-        common::assert_cli_exact(
-            &["claim-propagation-check", &seed.to_string()],
-            &expected_check_line(seed),
-        );
-    }
-}
-
-#[test]
-fn existing_m0_to_m21_exact_regression() {
-    common::assert_cli_exact_regression();
-}
+// claim-propagation-check 1/2를 포함한 M0~M2.2 exact 회귀는
+// common::CLI_EXACT_REGRESSION이 한 곳에서 담당한다.
