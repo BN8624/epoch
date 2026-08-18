@@ -2,6 +2,7 @@
 
 import {
   buildIndexes,
+  getCrisisView,
   getHouseRelations,
   getHouseView,
   getInitialSelection,
@@ -107,15 +108,20 @@ function renderRealm(idx, state) {
     <span class="aux-id">${escapeHtml(realm.shortLabel)}</span>
     <dl class="fact-list">
       <dt>수도</dt><dd>${escapeHtml(realm.capitalLabel)}</dd>
-      <dt>통치자</dt><dd>${escapeHtml(realm.incumbentName)}</dd>
+      ${
+        realm.vacant
+          ? `<dt>직전 통치자</dt><dd>${escapeHtml(realm.formerIncumbentName)} — 사망</dd>
+      <dt>현재 통치자</dt><dd>공석</dd>`
+          : `<dt>통치자</dt><dd>${escapeHtml(realm.incumbentName)}</dd>`
+      }
       <dt>다수 문화</dt><dd>${escapeHtml(realm.majorityCultureName)}</dd>
       <dt>다수 종교</dt><dd>${escapeHtml(realm.majorityReligionName)}</dd>
       <dt>영지 수</dt><dd>${realm.territoryCount}</dd>
     </dl>
     <h3>계승 권리</h3>
-    <div class="claim-card" data-role="incumbent">
-      <h3>현재 통치자</h3>
-      <p>${escapeHtml(realm.incumbentName)}</p>
+    <div class="claim-card" data-role="${realm.vacant ? 'vacant' : 'incumbent'}">
+      <h3>${realm.vacant ? '현재 통치자 공석' : '현재 통치자'}</h3>
+      <p>${realm.vacant ? '공석' : escapeHtml(realm.incumbentName)}</p>
     </div>
     <ul class="claim-list">
       ${realm.claims
@@ -312,6 +318,9 @@ function focusRestoreSelector(el) {
   if (el.dataset.houseId) {
     return `.house-card${attrSelector('data-house-id', el.dataset.houseId)}`;
   }
+  if (el.dataset.personId && el.classList.contains('crisis-candidate')) {
+    return `.crisis-candidate${attrSelector('data-person-id', el.dataset.personId)}`;
+  }
   if (el.dataset.personId) {
     return `.person-card${attrSelector('data-person-id', el.dataset.personId)}`;
   }
@@ -328,13 +337,88 @@ function applySelection(next) {
   return observer.state;
 }
 
+function renderCrisis(idx, state) {
+  const panel = document.getElementById('crisis-panel');
+  const root = document.getElementById('succession-crisis');
+  if (!panel || !root) return;
+  const crisis = getCrisisView(idx, state.selectedRealmId);
+  if (!crisis) {
+    panel.hidden = true;
+    root.innerHTML = '';
+    return;
+  }
+  panel.hidden = false;
+  const priority = crisis.priority;
+  const competingHtml = crisis.competing
+    .map(
+      (candidate) => `<button
+        type="button"
+        class="claim-card crisis-candidate"
+        data-person-id="${escapeHtml(candidate.personId)}"
+        data-candidate-priority="${escapeHtml(candidate.priority)}"
+        data-candidate-origin="${escapeHtml(candidate.origin)}"
+        aria-label="${escapeHtml(`${candidate.personName} 이 사람을 본다`)}"
+      >
+        <h3>${escapeHtml(candidate.personName)}</h3>
+        <p>${escapeHtml(candidate.standingLabel)}</p>
+        <p>${escapeHtml(candidate.reason)}</p>
+        ${
+          candidate.sourcePersonName
+            ? `<p data-derived-source="${escapeHtml(candidate.sourcePersonId ?? '')}">출처 ${escapeHtml(candidate.sourcePersonName)}</p>`
+            : ''
+        }
+      </button>`,
+    )
+    .join('');
+  root.innerHTML = `
+    <p data-role="former-incumbent">직전 통치자 ${escapeHtml(crisis.formerIncumbentName)} — 사망</p>
+    <p data-role="vacancy">현재 상태: 통치자 공석</p>
+    ${
+      priority
+        ? `<div class="crisis-priority">
+      <h3>법적 우선 후보</h3>
+      <button
+        type="button"
+        class="claim-card crisis-candidate is-priority"
+        data-person-id="${escapeHtml(priority.personId)}"
+        data-candidate-priority="${escapeHtml(priority.priority)}"
+        data-candidate-origin="${escapeHtml(priority.origin)}"
+        aria-label="${escapeHtml(`${priority.personName} 이 사람을 본다`)}"
+      >
+        <h3>${escapeHtml(priority.personName)}</h3>
+        <p>${escapeHtml(priority.standingLabel)}</p>
+        <p>${escapeHtml(priority.reason)}</p>
+      </button>
+    </div>`
+        : ''
+    }
+    <div class="crisis-competing">
+      <h3>경쟁 권리</h3>
+      <div class="crisis-competing-list">${competingHtml}</div>
+    </div>
+  `;
+  bindSelectable(root, '.crisis-candidate', (el) => {
+    applySelection(selectionAfterPerson(idx, el.dataset.personId, observer.state));
+  });
+}
+
 function renderAll() {
   const { idx, state } = observer;
   renderMap(idx, state);
+  renderCrisis(idx, state);
   renderRealm(idx, state);
   renderHouses(idx, state);
   renderPersons(idx, state);
   renderPersonDetail(idx, state);
+}
+
+async function loadOptionalJson(path) {
+  const response = await fetch(path);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`${path} 로드 실패 (${response.status})`);
+  }
+  return response.json();
 }
 
 async function boot() {
@@ -345,7 +429,8 @@ async function boot() {
       throw new Error(`rights-world.json 로드 실패 (${response.status})`);
     }
     const world = await response.json();
-    observer.idx = buildIndexes(world);
+    const succession = await loadOptionalJson('./succession-world.json');
+    observer.idx = buildIndexes(world, succession);
     observer.state = getInitialSelection(observer.idx);
     renderSummary(getWorldSummary(observer.idx));
     renderAll();

@@ -140,7 +140,28 @@ function informationProjection(item, realmById) {
   };
 }
 
-export function buildIndexes(world) {
+const SUCCESSION_PRIORITY_COPY = {
+  direct_strong_original: {
+    role: 'priority',
+    title: '법적 우선 후보',
+    standingLabel: '강한 직계 권리',
+    reason: '통치자의 직계 자녀이므로 법적 우선 후보',
+  },
+  restored_contested_original: {
+    role: 'competing',
+    title: '경쟁 권리',
+    standingLabel: '논쟁 중인 복권 권리',
+    reason: '공통 역사 기록을 가진 가문 주장',
+  },
+  restored_contested_derived: {
+    role: 'competing',
+    title: '경쟁 권리',
+    standingLabel: '혈통을 따라 파생된 복권 권리',
+    reason: '복권 권리가 부모에서 혈통을 따라 한 세대 전파됨',
+  },
+};
+
+export function buildIndexes(world, successionWorld = null) {
   const layers = layersOf(world);
   const territoryById = byId(layers.skeleton.territories);
   const realmById = byId(layers.skeleton.realms);
@@ -183,8 +204,15 @@ export function buildIndexes(world) {
     housesByRealm[realmId].sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  const derivedById = Object.create(null);
+  for (const derived of successionWorld?.pre_succession_world?.propagation?.derived_claims ?? []) {
+    derivedById[derived.id] = derived;
+  }
+
   return {
     world,
+    succession: successionWorld,
+    derivedById,
     layers,
     territoryById,
     realmById,
@@ -403,6 +431,64 @@ export function getVisibleInformation(idx, personId) {
     .map((item) => informationProjection(item, idx.realmById));
 }
 
+export function getSuccessionOverlay(idx, realmId) {
+  const transition = idx.succession?.transition;
+  if (!transition || transition.realm_id !== realmId) return null;
+  return transition;
+}
+
+export function getCrisisView(idx, realmId) {
+  const transition = getSuccessionOverlay(idx, realmId);
+  if (!transition) return null;
+  const former = idx.personById[transition.death.person_id];
+  const candidates = (transition.candidates ?? []).map((candidate) => {
+    const person = idx.personById[candidate.person_id];
+    const copy = SUCCESSION_PRIORITY_COPY[candidate.priority] ?? {
+      role: 'competing',
+      title: '계승 후보',
+      standingLabel: '계승 권리',
+      reason: '',
+    };
+    const derived = idx.derivedById?.[candidate.claim_record_id];
+    const sourceClaim = derived ? idx.claimById[derived.source_claim_id] : null;
+    const sourcePerson = sourceClaim
+      ? idx.personById[sourceClaim.claimant_person_id]
+      : derived
+        ? idx.personById[derived.via_parent_person_id]
+        : null;
+    return {
+      personId: candidate.person_id,
+      personName: person?.name ?? candidate.person_id,
+      houseId: candidate.house_id,
+      claimRecordId: candidate.claim_record_id,
+      origin: candidate.claim_origin,
+      priority: candidate.priority,
+      generationDistance: candidate.generation_distance,
+      role: copy.role,
+      title: copy.title,
+      standingLabel: copy.standingLabel,
+      reason: copy.reason,
+      isPriority: candidate.priority === 'direct_strong_original',
+      sourceClaimId: derived?.source_claim_id ?? null,
+      sourcePersonId: sourcePerson?.id ?? derived?.via_parent_person_id ?? null,
+      sourcePersonName: sourcePerson?.name ?? derived?.via_parent_person_id ?? null,
+    };
+  });
+  const priority = candidates.find((item) => item.isPriority) ?? null;
+  const competing = candidates.filter((item) => !item.isPriority);
+  return {
+    realmId: transition.realm_id,
+    formerIncumbentPersonId: transition.death.person_id,
+    formerIncumbentName: former?.name ?? transition.death.person_id,
+    vacant: transition.vacancy?.is_vacant === true,
+    presumptiveSuccessorPersonId: transition.presumptive_successor_person_id,
+    presumptiveSuccessorHouseId: transition.presumptive_successor_house_id,
+    candidates,
+    priority,
+    competing,
+  };
+}
+
 export function getRealmView(idx, realmId) {
   const realm = idx.realmById[realmId];
   if (!realm) return null;
@@ -414,6 +500,8 @@ export function getRealmView(idx, realmId) {
   const identity = idx.realmIdentityById[realmId];
   const claims = (idx.claimsByRealm[realmId] ?? []).map((claim) => claimProjection(claim, idx));
   const houses = housesForRealm(idx, realmId);
+  const crisis = getCrisisView(idx, realmId);
+  const vacant = Boolean(crisis?.vacant);
   return {
     id: realm.id,
     name: realm.name,
@@ -422,8 +510,12 @@ export function getRealmView(idx, realmId) {
     capitalLabel: capital
       ? `${capital.id} (${capital.x}, ${capital.y})`
       : realm.capital_territory_id,
-    incumbentPersonId: incumbentId,
-    incumbentName: incumbent?.name ?? skeletonRuler?.name ?? incumbentId,
+    incumbentPersonId: vacant ? null : incumbentId,
+    incumbentName: vacant ? '공석' : incumbent?.name ?? skeletonRuler?.name ?? incumbentId,
+    formerIncumbentPersonId: crisis?.formerIncumbentPersonId ?? null,
+    formerIncumbentName: crisis?.formerIncumbentName ?? null,
+    vacant,
+    crisis,
     majorityCultureName: nameOf(idx.cultureById, identity?.majority_culture_id),
     majorityReligionName: nameOf(idx.religionById, identity?.majority_religion_id),
     territoryCount: realm.territory_ids.length,

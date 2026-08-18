@@ -326,6 +326,16 @@ try {
   check('realm-codes', snapshot.realmCodes.length === 6, snapshot.realmCodes.join(','));
   check('initial-realm', snapshot.selectedRealm === firstRealm.name, snapshot.selectedRealm);
   check('initial-person', Boolean(snapshot.selectedPerson), snapshot.selectedPerson);
+  const crisisHidden = await cdp.eval(`({
+    panel: document.getElementById('crisis-panel'),
+    hidden: document.getElementById('crisis-panel')?.hidden ?? true,
+    text: document.getElementById('succession-crisis')?.innerText?.trim() || '',
+  })`);
+  check(
+    'no-crisis-on-plain-export',
+    Boolean(crisisHidden.hidden) && crisisHidden.text === '',
+    JSON.stringify(crisisHidden),
+  );
 
   await cdp.eval(`document.querySelector('[data-territory-id="${otherCapital}"]')?.click()`);
   await sleep(150);
