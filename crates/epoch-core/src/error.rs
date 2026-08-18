@@ -66,6 +66,8 @@ pub enum CoreError {
     InvalidFamily(String),
     /// 1세대 권리 전파 생성·검증 불변식 위반 (fail closed).
     InvalidClaimPropagation(String),
+    /// 통치자 사망 후 계승 계산·검증 불변식 위반 (fail closed).
+    InvalidSuccession(String),
 }
 
 impl fmt::Display for CoreError {
@@ -127,6 +129,7 @@ impl fmt::Display for CoreError {
             CoreError::InvalidClaimPropagation(msg) => {
                 write!(f, "invalid claim propagation: {msg}")
             }
+            CoreError::InvalidSuccession(msg) => write!(f, "invalid succession: {msg}"),
         }
     }
 }

@@ -21,6 +21,8 @@ pub mod rng;
 pub mod runtime;
 pub mod save;
 pub mod scheduler;
+pub mod succession;
+pub mod succession_gen;
 pub mod world;
 pub mod worldgen;
 
@@ -81,6 +83,14 @@ pub use rng::DeterministicRng;
 pub use runtime::RuntimeState;
 pub use save::{SAVE_SCHEMA_VERSION, SaveEnvelope, load_runtime_from_bytes, save_runtime_to_bytes};
 pub use scheduler::{Phase, ScheduledKey, Scheduler, SchedulerSnapshot};
+pub use succession::{
+    IncumbentDeath, RealmVacancy, SUCCESSION_CANDIDATE_COUNT, SUCCESSION_WORLD_SCHEMA_VERSION,
+    SuccessionCandidate, SuccessionClaimOrigin, SuccessionPriority, SuccessionTransition,
+    SuccessionWorld,
+};
+pub use succession_gen::{
+    generate_succession_world, resolve_incumbent_death, validate_succession_transition,
+};
 pub use world::{
     GenerationMeta, Realm, Ruler, Territory, WORLD_HEIGHT, WORLD_REALM_COUNT, WORLD_RULER_COUNT,
     WORLD_SCHEMA_VERSION, WORLD_TERRITORY_COUNT, WORLD_WIDTH, WorldSkeleton,
