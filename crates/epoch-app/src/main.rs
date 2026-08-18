@@ -275,6 +275,7 @@ fn export_rights_world(seed: u64, output_dir: &Path) -> Result<ExportReport, Str
     }
 
     write_managed_file(output_dir, RIGHTS_WORLD_FILE, &compact)?;
+    remove_managed_file(output_dir, SUCCESSION_WORLD_FILE)?;
 
     let exported_path = output_dir.join(RIGHTS_WORLD_FILE);
     let read_back = fs::read(&exported_path).map_err(|e| {
@@ -302,6 +303,17 @@ fn export_rights_world(seed: u64, output_dir: &Path) -> Result<ExportReport, Str
 fn write_managed_file(output_dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     let dest = output_dir.join(name);
     fs::write(&dest, bytes).map_err(|e| format!("cannot write '{}': {e}", dest.display()))
+}
+
+/// 이 export가 만들지 않는 관리 파일을 지운다. 같은 디렉터리를 재사용해도
+/// 이전 export의 overlay JSON이 남아 화면에 섞이지 않게 한다.
+fn remove_managed_file(output_dir: &Path, name: &str) -> Result<(), String> {
+    let dest = output_dir.join(name);
+    match fs::remove_file(&dest) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("cannot remove stale '{}': {e}", dest.display())),
+    }
 }
 
 #[cfg(test)]
@@ -403,6 +415,28 @@ mod tests {
         assert_eq!(exported, compact);
         let parsed: SuccessionWorld = serde_json::from_slice(&exported).expect("parse");
         assert_eq!(parsed, core);
+
+        let rights = generate_rights_world(1).expect("rights");
+        let rights_compact = rights.to_compact_json_bytes().expect("rights compact");
+        assert_eq!(
+            fs::read(tmp.0.join(RIGHTS_WORLD_FILE)).expect("read rights"),
+            rights_compact
+        );
+    }
+
+    #[test]
+    fn plain_export_removes_stale_succession_overlay() {
+        let tmp = TempDir::new("reuse");
+        export_succession_world(1, "realm-01", &tmp.0).expect("export succession");
+        assert!(tmp.0.join(SUCCESSION_WORLD_FILE).is_file());
+
+        let report = export_rights_world(1, &tmp.0).expect("export rights into same directory");
+        assert_eq!(report.files, 5);
+        assert_static_site(&tmp.0);
+        assert!(
+            !tmp.0.join(SUCCESSION_WORLD_FILE).exists(),
+            "plain export must not leave a succession overlay behind"
+        );
 
         let rights = generate_rights_world(1).expect("rights");
         let rights_compact = rights.to_compact_json_bytes().expect("rights compact");
