@@ -3,11 +3,12 @@
 use epoch_core::{
     ActiveRole, ClaimBasis, ClaimStanding, GenerationBand, SuccessionPriority,
     create_demo_checkpoint, generate_claim_propagation_world, generate_context_world,
-    generate_dynastic_world, generate_family_world, generate_political_world,
-    generate_rights_world, generate_succession_world, generate_world, load_runtime_from_bytes,
-    run_demo, run_demo_to_runtime, save_runtime_to_bytes, validate_initial_claim_propagation,
-    validate_initial_context, validate_initial_family, validate_initial_rights,
-    validate_political_roster, validate_population, validate_succession_transition, validate_world,
+    generate_dynastic_world, generate_family_world, generate_generation_continuation_world,
+    generate_political_world, generate_rights_world, generate_succession_world, generate_world,
+    load_runtime_from_bytes, run_demo, run_demo_to_runtime, save_runtime_to_bytes,
+    validate_generation_continuation, validate_initial_claim_propagation, validate_initial_context,
+    validate_initial_family, validate_initial_rights, validate_political_roster,
+    validate_population, validate_succession_transition, validate_world,
 };
 use std::env;
 use std::fs;
@@ -46,6 +47,8 @@ fn main() -> ExitCode {
         "claim-propagation-check" => cmd_claim_propagation_check(&args),
         "succession" => cmd_succession(&args),
         "succession-check" => cmd_succession_check(&args),
+        "continuation" => cmd_continuation(&args),
+        "continuation-check" => cmd_continuation_check(&args),
         other => {
             eprintln!("error: unknown command '{other}'");
             print_usage_stderr();
@@ -80,6 +83,8 @@ Usage:
   cargo run -p epoch-lab -- claim-propagation-check <seed>
   cargo run -p epoch-lab -- succession <seed> <realm-id>
   cargo run -p epoch-lab -- succession-check <seed>
+  cargo run -p epoch-lab -- continuation <seed>
+  cargo run -p epoch-lab -- continuation-check <seed>
 
 Commands:
   help              Show this help
@@ -102,6 +107,8 @@ Commands:
   claim-propagation-check  Generate twice, verify determinism and derived-claim invariants
   succession        Generate succession world for one realm and print pretty JSON
   succession-check  Independently verify all six realms for one seed
+  continuation      Generate generation-continuation world and print pretty JSON
+  continuation-check  Generate twice, verify determinism and continuation invariants
 "
     );
 }
@@ -130,6 +137,8 @@ Usage:
   cargo run -p epoch-lab -- claim-propagation-check <seed>
   cargo run -p epoch-lab -- succession <seed> <realm-id>
   cargo run -p epoch-lab -- succession-check <seed>
+  cargo run -p epoch-lab -- continuation <seed>
+  cargo run -p epoch-lab -- continuation-check <seed>
 "
     );
 }
@@ -1207,6 +1216,147 @@ fn cmd_succession_check(args: &[String]) -> ExitCode {
 
     println!(
         "SUCCESSION_OK seed={seed} realms={realms} candidates={candidates} direct_winners={direct_winners} restored_winners={restored_winners} derived_winners={derived_winners} vacancies={vacancies} realm01_bytes={realm01_bytes}"
+    );
+    ExitCode::SUCCESS
+}
+
+fn cmd_continuation(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    match generate_generation_continuation_world(seed) {
+        Ok(world) => match world.to_pretty_json() {
+            Ok(json) => {
+                println!("{json}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: failed to serialize generation continuation world: {e}");
+                ExitCode::from(1)
+            }
+        },
+        Err(e) => {
+            eprintln!("error: generation continuation failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn cmd_continuation_check(args: &[String]) -> ExitCode {
+    let seed = match parse_seed(args) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            print_usage_stderr();
+            return ExitCode::from(2);
+        }
+    };
+
+    let a = match generate_generation_continuation_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: first generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let b = match generate_generation_continuation_world(seed) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error: second generate failed: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if a != b {
+        eprintln!("error: structure inequality for seed={seed}");
+        return ExitCode::from(1);
+    }
+
+    let bytes_a = match a.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize first generation continuation world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let bytes_b = match b.to_compact_json_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: serialize second generation continuation world: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    if bytes_a != bytes_b {
+        eprintln!(
+            "error: compact JSON bytes differ for seed={seed} len_a={} len_b={}",
+            bytes_a.len(),
+            bytes_b.len()
+        );
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = validate_generation_continuation(&a.base_world, &a.continuation) {
+        eprintln!("error: generation continuation invariants failed: {e}");
+        return ExitCode::from(1);
+    }
+
+    let births = a.continuation.births.len();
+    let newborns = a.continuation.newborns.len();
+    let new_claims = a.continuation.derived_claims.len();
+    let claim_by_id: std::collections::BTreeMap<&str, &epoch_core::SuccessionClaim> = a
+        .base_world
+        .family_world
+        .rights_world
+        .rights
+        .claims
+        .iter()
+        .map(|c| (c.id.as_str(), c))
+        .collect();
+    let mut restored_sources = 0usize;
+    let mut direct_sources = 0usize;
+    for derived_claim in &a.continuation.derived_claims {
+        let source = match claim_by_id.get(derived_claim.source_claim_id.as_str()) {
+            Some(claim) => *claim,
+            None => {
+                eprintln!(
+                    "error: unknown source claim {}",
+                    derived_claim.source_claim_id
+                );
+                return ExitCode::from(1);
+            }
+        };
+        match source.basis {
+            ClaimBasis::RestoredLineRecord => restored_sources += 1,
+            ClaimBasis::DirectDescent => direct_sources += 1,
+        }
+    }
+    let population_persons = a
+        .base_world
+        .family_world
+        .rights_world
+        .context_world
+        .political
+        .dynastic
+        .population
+        .persons
+        .len();
+    let continuation_persons = match population_persons.checked_add(newborns) {
+        Some(n) => n,
+        None => {
+            eprintln!("error: continuation person count overflow");
+            return ExitCode::from(1);
+        }
+    };
+
+    println!(
+        "CONTINUATION_OK seed={seed} births={births} newborns={newborns} new_claims={new_claims} restored_sources={restored_sources} direct_sources={direct_sources} population_persons={population_persons} continuation_persons={continuation_persons} bytes={}",
+        bytes_a.len()
     );
     ExitCode::SUCCESS
 }
