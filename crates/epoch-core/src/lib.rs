@@ -5,6 +5,8 @@ pub mod claim_propagation_gen;
 pub mod command;
 pub mod context;
 pub mod contextgen;
+pub mod continuation;
+pub mod continuation_gen;
 pub mod demo;
 pub mod error;
 pub mod event;
@@ -44,6 +46,15 @@ pub use context::{
     Promise, RELATION_COUNT, RELIGION_COUNT, RealmIdentity, Religion,
 };
 pub use contextgen::{derive_initial_context, generate_context_world, validate_initial_context};
+pub use continuation::{
+    BIRTH_COUNT, BirthRecord, GENERATION_CONTINUATION_WORLD_SCHEMA_VERSION, GenerationContinuation,
+    GenerationContinuationWorld, NEWBORN_COUNT, NEXT_GENERATION_CLAIM_COUNT, NewbornPerson,
+    NextGenerationClaim,
+};
+pub use continuation_gen::{
+    derive_generation_continuation, generate_generation_continuation_world,
+    validate_generation_continuation,
+};
 pub use demo::{
     DemoResult, create_demo_checkpoint, create_demo_runtime, run_demo, run_demo_to_runtime,
     run_demo_via_checkpoint,
