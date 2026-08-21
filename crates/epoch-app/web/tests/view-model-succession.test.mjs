@@ -14,6 +14,8 @@ import {
   getSuccessionCandidateDetail,
   getSuccessionDisputeView,
   getSuccessionHouseDetail,
+  getSuccessionVisiblePromises,
+  getHouseRelations,
   getVisibleInformation,
 } from '../view-model.js';
 
@@ -378,6 +380,15 @@ test('seed 1 dispute candidate and house details keep privacy and actual relatio
       assert.equal(house03Ids.has(item.id), false);
     }
 
+    assert.equal('majorityCultureName' in house01, false);
+    assert.equal('majorityReligionName' in house01, false);
+    assert.equal(
+      house01.promises.every((item) => item.unresolved === false && item.sentence),
+      true,
+    );
+    assert.equal(house01.relations.every((rel) => rel.unresolved === false), true);
+    assert.equal(dispute.vacancyLabel, '공석');
+
     const kindLabel = { cooperative: '협력', rival: '대립', competitive: '경쟁' };
     const rawRelations = idx.layers.context.relations.filter(
       (rel) => rel.house_a_id === 'house-01' || rel.house_b_id === 'house-01',
@@ -527,6 +538,47 @@ test('malformed claim, evidence, house, and slot counts stay unresolved', () => 
     };
     const dup = disputeOf(world, duplicatePriority);
     assert.equal(dup.unresolved, true);
+
+    const notVacant = structuredClone(succession);
+    notVacant.transition.vacancy.is_vacant = false;
+    const seated = disputeOf(world, notVacant);
+    assert.equal(seated.vacant, false);
+    assert.equal(seated.vacancyLabel, null);
+    assert.equal(seated.unresolved, true);
+
+    const missingPromisee = structuredClone(world);
+    const headId = buildIndexes(world, succession).houseById['house-01'].head_person_id;
+    const knownPromise = missingPromisee.context_world.context.promises.find((promise) =>
+      (promise.known_by_person_ids ?? []).includes(headId),
+    );
+    assert.ok(knownPromise, 'house-01 head must know a promise');
+    const promiseeId = knownPromise.promisee_person_id;
+    personsOf(missingPromisee).splice(
+      personsOf(missingPromisee).findIndex((person) => person.id === promiseeId),
+      1,
+    );
+    const brokenPromiseIdx = buildIndexes(missingPromisee, succession);
+    const brokenPromises = getSuccessionVisiblePromises(brokenPromiseIdx, headId);
+    const brokenPromise = brokenPromises.find((item) => item.id === knownPromise.id);
+    assert.equal(brokenPromise.unresolved, true);
+    assert.equal(brokenPromise.sentence, null);
+    assert.equal(
+      getSuccessionHouseDetail(brokenPromiseIdx, 'realm-01', 'house-01').unresolved,
+      true,
+    );
+
+    const unknownRelation = structuredClone(world);
+    unknownRelation.context_world.context.relations[0].kind = 'unmapped_kind';
+    const relationIdx = buildIndexes(unknownRelation, succession);
+    const brokenRelations = getHouseRelations(
+      relationIdx,
+      unknownRelation.context_world.context.relations[0].house_a_id,
+    );
+    assert.equal(
+      brokenRelations.some((rel) => rel.kind === 'unmapped_kind' && rel.unresolved === true),
+      true,
+    );
+    assert.equal(getSuccessionDisputeView(relationIdx, 'realm-01').unresolved, true);
 
     const extraHouse = structuredClone(world);
     const copied = structuredClone(housesOf(extraHouse).find((house) => house.id === 'house-02'));

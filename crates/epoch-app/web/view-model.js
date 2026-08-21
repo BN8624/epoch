@@ -322,13 +322,16 @@ export function getHouseRelations(idx, houseId) {
     if (rel.house_a_id !== houseId && rel.house_b_id !== houseId) continue;
     const otherId = rel.house_a_id === houseId ? rel.house_b_id : rel.house_a_id;
     const other = idx.houseById[otherId];
-    const kindLabel = RELATION_LABEL[rel.kind] ?? rel.kind;
+    const otherName = resolvedName(other);
+    const knownKindLabel = RELATION_LABEL[rel.kind] ?? null;
+    const kindLabel = knownKindLabel ?? rel.kind;
     out.push({
       otherHouseId: otherId,
       otherHouseName: other?.name ?? otherId,
       kind: rel.kind,
       kindLabel,
       sentence: `${house.name}와 ${other?.name ?? otherId}는 ${kindLabel} 관계입니다.`,
+      unresolved: !otherName || !knownKindLabel || !resolvedName(house),
     });
   }
   return out;
@@ -518,26 +521,39 @@ export function getSuccessionHeadStatus(idx, houseId) {
 function successionPromiseSentence(idx, promise) {
   const promisor = idx.personById[promise.promisor_person_id];
   const promisee = idx.personById[promise.promisee_person_id];
-  const realm = idx.realmById[promise.realm_id];
-  const realmName = realm?.name ?? promise.realm_id;
-  const reward = rewardPhrase(promise.reward_key, realmName);
+  const realmName = resolvedName(idx.realmById[promise.realm_id]);
+  const promiseeName = resolvedName(promisee);
+  const promisorName = resolvedName(promisor);
   const deceasedId = successionDeceasedPersonId(idx);
-  const promiseeName = resolvedName(promisee) ?? promise.promisee_person_id;
-  if (deceasedId && promise.promisor_person_id === deceasedId) {
-    return `직전 통치자가 생전에 ${promiseeName}에게 ${reward}를 약속함`;
+  const promisorIsDeceased = Boolean(deceasedId && promise.promisor_person_id === deceasedId);
+  if (!realmName || !promiseeName || (!promisorIsDeceased && !promisorName)) {
+    return { sentence: null, unresolved: true };
   }
-  const promisorName = resolvedName(promisor) ?? promise.promisor_person_id;
-  return `${promisorName}이 ${promiseeName}에게 ${reward}를 약속했습니다.`;
+  const reward = rewardPhrase(promise.reward_key, realmName);
+  if (promisorIsDeceased) {
+    return {
+      sentence: `직전 통치자가 생전에 ${promiseeName}에게 ${reward}를 약속함`,
+      unresolved: false,
+    };
+  }
+  return {
+    sentence: `${promisorName}이 ${promiseeName}에게 ${reward}를 약속했습니다.`,
+    unresolved: false,
+  };
 }
 
 export function getSuccessionVisiblePromises(idx, personId) {
   return idx.layers.context.promises
     .filter((promise) => (promise.known_by_person_ids ?? []).includes(personId))
-    .map((promise) => ({
-      id: promise.id,
-      realmId: promise.realm_id,
-      sentence: successionPromiseSentence(idx, promise),
-    }));
+    .map((promise) => {
+      const projected = successionPromiseSentence(idx, promise);
+      return {
+        id: promise.id,
+        realmId: promise.realm_id,
+        sentence: projected.sentence,
+        unresolved: projected.unresolved,
+      };
+    });
 }
 
 function emptyDerivedProvenance(overrides = {}) {
@@ -710,7 +726,7 @@ function projectDisputeHouse(idx, house, realmId) {
       identity && realmIdentity ? identityStance(identity, realmIdentity) : null,
     headStatus,
     relationSummary: relations.map((rel) => rel.sentence),
-    unresolved: !resolvedName(house),
+    unresolved: !resolvedName(house) || relations.some((rel) => rel.unresolved),
   };
 }
 
@@ -719,6 +735,7 @@ export function getSuccessionDisputeView(idx, realmId) {
   if (!transition) return null;
   const realm = idx.realmById[transition.realm_id];
   const former = idx.personById[transition.death.person_id];
+  const vacant = transition.vacancy?.is_vacant === true;
   const rawCandidates = transition.candidates ?? [];
   const mapped = rawCandidates.map((candidate) =>
     projectDisputeCandidate(idx, candidate, transition.death.person_id, transition.realm_id),
@@ -745,7 +762,8 @@ export function getSuccessionDisputeView(idx, realmId) {
     realmName: resolvedName(realm),
     formerIncumbentPersonId: transition.death.person_id,
     formerIncumbentName: resolvedName(former),
-    vacant: transition.vacancy?.is_vacant === true,
+    vacant,
+    vacancyLabel: vacant ? '공석' : null,
     legalStatus: '법적 우선 후보가 있으나 계승은 확정되지 않음',
     presumptiveSuccessorPersonId: transition.presumptive_successor_person_id,
     presumptiveSuccessorHouseId: transition.presumptive_successor_house_id,
@@ -757,6 +775,7 @@ export function getSuccessionDisputeView(idx, realmId) {
     unresolved:
       !resolvedName(realm) ||
       !resolvedName(former) ||
+      !vacant ||
       rawCandidates.length !== 3 ||
       !slotsUnique ||
       candidates.length !== 3 ||
@@ -774,6 +793,7 @@ export function getSuccessionCandidateDetail(idx, realmId, personId) {
   const person = getPersonView(idx, personId);
   if (!person) return null;
   const houseContext = politicalContextForHouse(idx, card.houseId, dispute.realmId);
+  const promises = getSuccessionVisiblePromises(idx, personId);
   const politicalLines = [...houseContext.lines];
   if (person.activityLabel) politicalLines.push(person.activityLabel);
   const lineage =
@@ -825,9 +845,10 @@ export function getSuccessionCandidateDetail(idx, realmId, personId) {
     },
     lineage,
     politicalContext: politicalLines,
-    promises: getSuccessionVisiblePromises(idx, personId),
+    promises,
     information: getVisibleInformation(idx, personId),
-    unresolved: card.unresolved || !card.personName,
+    unresolved:
+      card.unresolved || !card.personName || promises.some((promise) => promise.unresolved),
   };
 }
 
@@ -838,12 +859,11 @@ export function getSuccessionHouseDetail(idx, realmId, houseId) {
   if (!card) return null;
   const house = idx.houseById[houseId];
   if (!house) return null;
-  const realmIdentity = idx.realmIdentityById[realmId];
-  const identity = idx.houseIdentityById[houseId];
   const headStatus = card.headStatus;
   const knowledgePersonId = house.head_person_id;
   const information = getVisibleInformation(idx, knowledgePersonId);
   const promises = getSuccessionVisiblePromises(idx, knowledgePersonId);
+  const relations = getHouseRelations(idx, houseId);
   return {
     id: house.id,
     name: card.name,
@@ -853,9 +873,7 @@ export function getSuccessionHouseDetail(idx, realmId, houseId) {
     cultureName: card.cultureName,
     religionName: card.religionName,
     identityStance: card.identityStance,
-    majorityCultureName: nameOf(idx.cultureById, realmIdentity?.majority_culture_id, null),
-    majorityReligionName: nameOf(idx.religionById, realmIdentity?.majority_religion_id, null),
-    relations: getHouseRelations(idx, houseId),
+    relations,
     promises,
     information,
     informationLabel: headStatus.isDeceasedHead
@@ -864,7 +882,10 @@ export function getSuccessionHouseDetail(idx, realmId, houseId) {
     promiseLabel: headStatus.isDeceasedHead
       ? '직전 수장이 사망 전에 알고 있던 약속'
       : '수장이 알고 있는 약속',
-    unresolved: card.unresolved,
+    unresolved:
+      card.unresolved ||
+      relations.some((rel) => rel.unresolved) ||
+      promises.some((promise) => promise.unresolved),
   };
 }
 
