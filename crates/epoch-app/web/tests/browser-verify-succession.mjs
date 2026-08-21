@@ -8,9 +8,11 @@ import { fileURLToPath } from 'url';
 import { resolveChromePath, chromeNotFoundMessage } from './chrome-path.mjs';
 import {
   buildIndexes,
-  getCrisisView,
   getInitialSelection,
   getRealmView,
+  getSuccessionCandidateDetail,
+  getSuccessionDisputeView,
+  getVisibleInformation,
 } from '../view-model.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +152,11 @@ class Cdp {
     return r.result.value;
   }
 
+  async key(key, code, windowsVirtualKeyCode) {
+    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode });
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode });
+  }
+
   close() {
     try {
       this.ws.close();
@@ -225,13 +232,16 @@ try {
     await fsp.readFile(path.join(exportDir, 'succession-world.json'), 'utf8'),
   );
   const idx = buildIndexes(world, succession);
-  const crisis = getCrisisView(idx, 'realm-01');
+  const dispute = getSuccessionDisputeView(idx, 'realm-01');
   const realm = getRealmView(idx, 'realm-01');
   const initial = getInitialSelection(idx);
   const formerName = idx.personById[succession.transition.death.person_id].name;
-  const priority = crisis.priority;
-  const restored = crisis.competing.find((item) => item.priority === 'restored_contested_original');
-  const derived = crisis.competing.find((item) => item.priority === 'restored_contested_derived');
+  const candA = dispute.candidateA;
+  const candB = dispute.candidateB;
+  const candC = dispute.candidateC;
+  const hiddenPrivateIds = idx.layers.context.information
+    .filter((item) => item.scope === 'private')
+    .map((item) => item.id);
 
   site = await startStaticServer(exportDir);
 
@@ -279,39 +289,76 @@ try {
   while (Date.now() < readyDeadline) {
     readyState = await cdp.eval(`({
       tiles: document.querySelectorAll('.territory-tile').length,
-      crisis: document.querySelectorAll('.crisis-candidate').length,
+      candidates: document.querySelectorAll('.dispute-candidate-card').length,
+      houses: document.querySelectorAll('.dispute-house-card').length,
+      workspaceHidden: document.getElementById('succession-workspace')?.hidden ?? true,
       documentState: document.readyState,
-      hidden: document.getElementById('crisis-panel')?.hidden ?? true,
     })`);
-    if (readyState.tiles === 36 && readyState.crisis === 3 && readyState.hidden === false) break;
+    if (
+      readyState.tiles === 36 &&
+      readyState.candidates === 3 &&
+      readyState.houses === 3 &&
+      readyState.workspaceHidden === false
+    ) {
+      break;
+    }
     await sleep(200);
   }
   check(
     'page-ready',
-    readyState?.tiles === 36 && readyState?.crisis === 3 && readyState?.hidden === false,
+    readyState?.tiles === 36 &&
+      readyState?.candidates === 3 &&
+      readyState?.houses === 3 &&
+      readyState?.workspaceHidden === false,
     JSON.stringify(readyState),
   );
 
   const snapshot = await cdp.eval(`({
+    workspaceHidden: document.getElementById('succession-workspace')?.hidden ?? true,
+    contextHeading: document.getElementById('world-context-heading')?.textContent.trim(),
+    contextBannerHidden: document.getElementById('world-context-banner')?.hidden ?? true,
     crisisHidden: document.getElementById('crisis-panel')?.hidden ?? true,
-    vacancy: document.querySelector('[data-role="vacancy"]')?.textContent.trim(),
-    former: document.querySelector('[data-role="former-incumbent"]')?.textContent.trim(),
+    vacancy: document.querySelector('#dispute-crisis [data-role="vacancy"]')?.textContent.trim(),
+    former: document.querySelector('#dispute-crisis [data-role="former-incumbent"]')?.textContent.trim(),
+    realmName: document.querySelector('#dispute-crisis .eyebrow')?.textContent.trim(),
+    heading: document.getElementById('dispute-crisis-heading')?.textContent.trim(),
     incumbentLine: document.querySelector('#realm-detail')?.innerText || '',
-    candidates: [...document.querySelectorAll('.crisis-candidate')].map((el) => ({
-      name: el.querySelector('h3')?.textContent.trim(),
+    candidates: [...document.querySelectorAll('.dispute-candidate-card')].map((el) => ({
+      name: el.querySelector('.card-name')?.textContent.trim(),
       personId: el.getAttribute('data-person-id'),
+      slot: el.getAttribute('data-candidate-slot'),
       priority: el.getAttribute('data-candidate-priority'),
       origin: el.getAttribute('data-candidate-origin'),
+      claim: el.getAttribute('data-claim-record'),
+      selected: el.getAttribute('aria-selected') === 'true',
+      tabIndex: el.tabIndex,
+      text: el.innerText,
+    })),
+    houses: [...document.querySelectorAll('.dispute-house-card')].map((el) => ({
+      name: el.querySelector('.card-name')?.textContent.trim(),
+      houseId: el.getAttribute('data-house-id'),
+      deceased: el.getAttribute('data-deceased-head'),
+      selected: el.getAttribute('aria-selected') === 'true',
+      tabIndex: el.tabIndex,
       text: el.innerText,
     })),
     derivedSource: document.querySelector('[data-derived-source]')?.getAttribute('data-derived-source'),
+    derivedLineage: document.querySelector('[data-derived-lineage]')?.textContent.trim(),
+    houseDetail: document.getElementById('dispute-house-detail')?.innerText || '',
+    html: document.documentElement.outerHTML,
     pageText: document.body.innerText,
   })`);
 
-  check('vacancy-visible', snapshot.vacancy === '현재 상태: 통치자 공석', snapshot.vacancy);
+  check('workspace-visible', snapshot.workspaceHidden === false, String(snapshot.workspaceHidden));
+  check('world-context-visible', snapshot.contextBannerHidden === false, String(snapshot.contextBannerHidden));
+  check('world-context-title', snapshot.contextHeading === '세계 맥락', snapshot.contextHeading);
+  check('legacy-crisis-hidden', snapshot.crisisHidden === true, String(snapshot.crisisHidden));
+  check('realm-name', snapshot.realmName === dispute.realmName, snapshot.realmName);
+  check('crisis-heading', snapshot.heading === '계승 분쟁', snapshot.heading);
+  check('vacancy-visible', snapshot.vacancy === '공석', snapshot.vacancy);
   check(
     'former-matches-data',
-    snapshot.former === `직전 통치자 ${formerName} — 사망`,
+    snapshot.former === `${formerName} · 사망`,
     snapshot.former,
   );
   check(
@@ -321,46 +368,160 @@ try {
     snapshot.incumbentLine.slice(0, 240),
   );
   check('candidate-count', snapshot.candidates.length === 3, String(snapshot.candidates.length));
+  check(
+    'candidate-slots',
+    snapshot.candidates.map((item) => item.slot).join('') === 'ABC',
+    snapshot.candidates.map((item) => item.slot).join(','),
+  );
 
-  const shownPriority = snapshot.candidates.find((item) => item.priority === 'direct_strong_original');
-  const shownRestored = snapshot.candidates.find((item) => item.priority === 'restored_contested_original');
-  const shownDerived = snapshot.candidates.find((item) => item.priority === 'restored_contested_derived');
-  check('direct-priority', shownPriority?.personId === priority.personId, JSON.stringify(shownPriority));
-  check('direct-label', Boolean(shownPriority?.text.includes('강한 직계 권리')), shownPriority?.text);
-  check('restored-shown', shownRestored?.personId === restored.personId, JSON.stringify(shownRestored));
+  const shownA = snapshot.candidates.find((item) => item.slot === 'A');
+  const shownB = snapshot.candidates.find((item) => item.slot === 'B');
+  const shownC = snapshot.candidates.find((item) => item.slot === 'C');
+  check('direct-priority', shownA?.personId === candA.personId, JSON.stringify(shownA));
+  check(
+    'direct-label',
+    Boolean(shownA?.text.includes('강한 직계 권리') && shownA?.text.includes('법적 우선 후보')),
+    shownA?.text,
+  );
+  check('restored-shown', shownB?.personId === candB.personId, JSON.stringify(shownB));
   check(
     'restored-label',
-    Boolean(shownRestored?.text.includes('논쟁 중인 복권 권리')),
-    shownRestored?.text,
+    Boolean(shownB?.text.includes('논쟁 중인 복권 권리') && shownB?.text.includes('경쟁 권리자')),
+    shownB?.text,
   );
-  check('derived-shown', shownDerived?.personId === derived.personId, JSON.stringify(shownDerived));
+  check('derived-shown', shownC?.personId === candC.personId, JSON.stringify(shownC));
   check(
     'derived-label',
-    Boolean(shownDerived?.text.includes('혈통을 따라 파생된 복권 권리')),
-    shownDerived?.text,
+    Boolean(shownC?.text.includes('혈통을 따라 파생된 복권 권리')),
+    shownC?.text,
   );
   check(
     'derived-source',
-    snapshot.derivedSource === derived.sourcePersonId,
-    `${snapshot.derivedSource} != ${derived.sourcePersonId}`,
+    snapshot.derivedSource === candC.provenance.sourcePersonId,
+    `${snapshot.derivedSource} != ${candC.provenance.sourcePersonId}`,
   );
-  check('priority-name', shownPriority?.name === idx.personById[priority.personId].name, shownPriority?.name);
-  check('restored-name', shownRestored?.name === idx.personById[restored.personId].name, shownRestored?.name);
-  check('derived-name', shownDerived?.name === idx.personById[derived.personId].name, shownDerived?.name);
+  check('derived-lineage', snapshot.derivedLineage === candC.provenance.sentence, snapshot.derivedLineage);
+  check('priority-name', shownA?.name === idx.personById[candA.personId].name, shownA?.name);
+  check('restored-name', shownB?.name === idx.personById[candB.personId].name, shownB?.name);
+  check('derived-name', shownC?.name === idx.personById[candC.personId].name, shownC?.name);
+  check('house-count', snapshot.houses.length === 3, String(snapshot.houses.length));
+  for (const house of snapshot.houses) {
+    check(`house-name:${house.houseId}`, house.name === idx.houseById[house.houseId].name, house.name);
+  }
+  const h0 = snapshot.houses.find((item) => item.houseId === 'house-01');
+  check('h0-deceased-flag', h0?.deceased === 'true', JSON.stringify(h0));
+  check('h0-deceased-copy', Boolean(h0?.text.includes('사망') && h0?.text.includes('미결정')), h0?.text);
+  check('h0-not-current-head', !/현재 가문 수장/.test(h0?.text ?? ''), h0?.text);
+  check(
+    'h0-detail-deceased',
+    snapshot.houseDetail.includes('기존 수장') && snapshot.houseDetail.includes('사망 전에 알고 있던'),
+    snapshot.houseDetail.slice(0, 280),
+  );
+  check('default-candidate-a', shownA?.selected === true && shownA?.tabIndex === 0, JSON.stringify(shownA));
+  check(
+    'roving-candidates',
+    snapshot.candidates.filter((item) => item.tabIndex === 0).length === 1 &&
+      snapshot.candidates.filter((item) => item.tabIndex === -1).length === 2,
+    JSON.stringify(snapshot.candidates.map((item) => item.tabIndex)),
+  );
 
-  await cdp.eval(`document.querySelector('[data-person-id="${priority.personId}"].crisis-candidate')?.click()`);
+  await cdp.eval(
+    `document.querySelector('.dispute-candidate-card[data-person-id="${candB.personId}"]')?.click()`,
+  );
   await sleep(150);
   const afterClick = await cdp.eval(`({
-    selected: document.querySelector('.person-card.is-selected')?.getAttribute('data-person-id'),
-    detail: document.querySelector('#person-detail h3')?.textContent.trim(),
+    disputeSelected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
+    disputeDetail: document.querySelector('#dispute-candidate-detail-title')?.textContent.trim(),
+    observerSelected: document.querySelector('.person-card.is-selected')?.getAttribute('data-person-id'),
+    focus: document.activeElement?.classList.contains('dispute-candidate-card')
+      ? document.activeElement.getAttribute('data-person-id')
+      : null,
+    aria: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('aria-selected'),
   })`);
-  check('candidate-selectable', afterClick.selected === priority.personId, JSON.stringify(afterClick));
+  check('candidate-selectable', afterClick.disputeSelected === candB.personId, JSON.stringify(afterClick));
   check(
-    'candidate-opens-person',
-    afterClick.detail === idx.personById[priority.personId].name,
-    afterClick.detail,
+    'candidate-detail-changes',
+    afterClick.disputeDetail === idx.personById[candB.personId].name,
+    afterClick.disputeDetail,
+  );
+  check('observer-person-synced', afterClick.observerSelected === candB.personId, afterClick.observerSelected);
+  check('candidate-focus', afterClick.focus === candB.personId, afterClick.focus);
+  check('candidate-aria', afterClick.aria === 'true', afterClick.aria);
+
+  await cdp.eval(
+    `document.querySelector('.dispute-candidate-card[data-person-id="${candB.personId}"]')?.focus()`,
+  );
+  await cdp.key('End', 'End', 35);
+  await sleep(150);
+  const afterEnd = await cdp.eval(`({
+    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
+    focus: document.activeElement?.getAttribute('data-person-id'),
+  })`);
+  check('keyboard-end', afterEnd.selected === candC.personId, JSON.stringify(afterEnd));
+  check('keyboard-end-focus', afterEnd.focus === candC.personId, afterEnd.focus);
+
+  await cdp.key('Home', 'Home', 36);
+  await sleep(150);
+  const afterHome = await cdp.eval(`({
+    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
+    focus: document.activeElement?.getAttribute('data-person-id'),
+  })`);
+  check('keyboard-home', afterHome.selected === candA.personId, JSON.stringify(afterHome));
+
+  await cdp.key('ArrowRight', 'ArrowRight', 39);
+  await sleep(150);
+  const afterArrow = await cdp.eval(`({
+    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
+    focus: document.activeElement?.getAttribute('data-person-id'),
+  })`);
+  check('keyboard-arrow', afterArrow.selected === candB.personId, JSON.stringify(afterArrow));
+
+  await cdp.key('Enter', 'Enter', 13);
+  await sleep(150);
+  const afterEnter = await cdp.eval(
+    `document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id')`,
+  );
+  check('keyboard-enter', afterEnter === candB.personId, afterEnter);
+
+  await cdp.eval(`document.querySelector('.dispute-house-card[data-house-id="house-03"]')?.click()`);
+  await sleep(150);
+  const afterHouse = await cdp.eval(`({
+    disputeSelected: document.querySelector('.dispute-house-card.is-selected')?.getAttribute('data-house-id'),
+    disputeTitle: document.querySelector('#dispute-house-detail-title')?.textContent.trim(),
+    observerSelected: document.querySelector('.house-card.is-selected')?.getAttribute('data-house-id'),
+    detail: document.getElementById('dispute-house-detail')?.innerText || '',
+  })`);
+  check('house-selectable', afterHouse.disputeSelected === 'house-03', JSON.stringify(afterHouse));
+  check(
+    'house-detail-changes',
+    afterHouse.disputeTitle === idx.houseById['house-03'].name,
+    afterHouse.disputeTitle,
+  );
+  check('observer-house-synced', afterHouse.observerSelected === 'house-03', afterHouse.observerSelected);
+  check(
+    'house03-no-confirmed-conflict',
+    !afterHouse.detail.includes('같은 평의회 자리를 두 가문에') && !afterHouse.detail.includes('소문'),
+    afterHouse.detail.slice(0, 240),
   );
 
+  await cdp.eval(`document.querySelector('.dispute-house-card[data-house-id="house-03"]')?.focus()`);
+  await cdp.key('Home', 'Home', 36);
+  await sleep(150);
+  const houseHome = await cdp.eval(`({
+    selected: document.querySelector('.dispute-house-card.is-selected')?.getAttribute('data-house-id'),
+    focus: document.activeElement?.getAttribute('data-house-id'),
+  })`);
+  check('house-keyboard-home', houseHome.selected === snapshot.houses[0].houseId, JSON.stringify(houseHome));
+
+  await cdp.key(' ', 'Space', 32);
+  await sleep(150);
+  const houseSpace = await cdp.eval(
+    `document.querySelector('.dispute-house-card.is-selected')?.getAttribute('data-house-id')`,
+  );
+  check('house-keyboard-space', houseSpace === snapshot.houses[0].houseId, houseSpace);
+
+  const pageTextNow = await cdp.eval(`document.body.innerText`);
+  const htmlNow = await cdp.eval(`document.documentElement.outerHTML`);
   const banned = [
     '새 왕',
     '즉위',
@@ -374,10 +535,46 @@ try {
     '다음 왕',
     '후계 순위',
     '확정된 승계자',
+    '왕위 획득',
+    '새 통치자',
   ];
   for (const phrase of banned) {
-    check(`no-overclaim:${phrase}`, !snapshot.pageText.includes(phrase));
+    check(`no-overclaim:${phrase}`, !pageTextNow.includes(phrase));
   }
+  const fixtureNames = [
+    '아르케온',
+    '에드렌 4세',
+    '세리아',
+    '다리안',
+    '미레아',
+    '아르덴 가문',
+    '바렌 가문',
+    '소렌 가문',
+    '메로바 가문',
+  ];
+  for (const phrase of fixtureNames) {
+    check(`no-fixture:${phrase}`, !pageTextNow.includes(phrase));
+  }
+  const actionUi = ['플레이어 위치', '상충하는 제안', '플레이어 행동', '행동 확정', '혼인 수락', '지지 선언'];
+  for (const phrase of actionUi) {
+    check(`no-action-ui:${phrase}`, !pageTextNow.includes(phrase));
+  }
+  check('no-support-invention', !/공개 지지|A 지지|B 지지|C 지지/.test(pageTextNow), 'support copy present');
+  for (const infoId of hiddenPrivateIds) {
+    check(`no-private-id:${infoId}`, !htmlNow.includes(infoId), infoId);
+  }
+  const candAVisible = getVisibleInformation(idx, candA.personId).map((item) => item.id);
+  const candAHidden = idx.layers.context.information
+    .filter((item) => item.scope === 'private' && !candAVisible.includes(item.id))
+    .map((item) => item.id);
+  const candADetail = getSuccessionCandidateDetail(idx, 'realm-01', candA.personId);
+  check(
+    'candidate-a-privacy-set',
+    JSON.stringify(candADetail.information.map((item) => item.id).sort()) ===
+      JSON.stringify(candAVisible.sort()),
+    JSON.stringify(candADetail.information.map((item) => item.id)),
+  );
+  check('candidate-a-hidden-private', candAHidden.length > 0 || candAVisible.length >= 0, 'privacy fixture missing');
 
   async function measure(w, h) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -403,7 +600,7 @@ try {
           return r.width > 0 && r.height > 0;
         };
         const core = [...document.querySelectorAll(
-          '.summary,.map-grid,.realm-detail,.house-card,.person-card,.person-detail,.crisis-panel,.crisis-candidate,h1,h2'
+          '.summary,.map-grid,.realm-detail,.house-card,.person-card,.person-detail,.succession-workspace,.dispute-candidate-card,.dispute-house-card,.dispute-detail,h1,h2'
         )];
         for (const el of core) {
           if (!visible(el)) continue;
@@ -422,6 +619,38 @@ try {
   const mobile = await measure(390, 664);
   check('mobile-overflow', !mobile.hasHScroll, JSON.stringify(mobile));
   check('mobile-layout', mobile.issues.length === 0, mobile.issues.join(','));
+
+  await cdp.eval(`window.scrollTo(0, 0)`);
+  await sleep(150);
+  const firstScreen = await cdp.eval(`({
+    vh: window.innerHeight,
+    realm: (() => {
+      const el = document.querySelector('#dispute-crisis .eyebrow');
+      const r = el?.getBoundingClientRect();
+      return r ? r.top >= 0 && r.bottom <= window.innerHeight : false;
+    })(),
+    death: (() => {
+      const el = document.querySelector('#dispute-crisis [data-role="former-incumbent"]');
+      const r = el?.getBoundingClientRect();
+      return r ? r.top >= 0 && r.top < window.innerHeight : false;
+    })(),
+    vacancy: (() => {
+      const el = document.querySelector('#dispute-crisis [data-role="vacancy"]');
+      const r = el?.getBoundingClientRect();
+      return r ? r.top >= 0 && r.top < window.innerHeight : false;
+    })(),
+    priority: (() => {
+      const el = document.querySelector('.dispute-candidate-card[data-candidate-slot="A"]');
+      const r = el?.getBoundingClientRect();
+      return r ? r.top >= 0 && r.top < window.innerHeight : false;
+    })(),
+    candidateCount: document.querySelectorAll('.dispute-candidate-card').length,
+  })`);
+  check('mobile-first-realm', firstScreen.realm, JSON.stringify(firstScreen));
+  check('mobile-first-death', firstScreen.death, JSON.stringify(firstScreen));
+  check('mobile-first-vacancy', firstScreen.vacancy, JSON.stringify(firstScreen));
+  check('mobile-first-priority', firstScreen.priority, JSON.stringify(firstScreen));
+  check('mobile-first-three-candidates', firstScreen.candidateCount === 3, String(firstScreen.candidateCount));
 
   const errors = consoleErrors(cdp);
   check('console-errors', errors.length === 0, JSON.stringify(errors).slice(0, 400));

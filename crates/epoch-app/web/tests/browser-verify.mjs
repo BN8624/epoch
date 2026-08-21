@@ -330,11 +330,27 @@ try {
     panel: document.getElementById('crisis-panel'),
     hidden: document.getElementById('crisis-panel')?.hidden ?? true,
     text: document.getElementById('succession-crisis')?.innerText?.trim() || '',
+    workspaceHidden: document.getElementById('succession-workspace')?.hidden ?? true,
+    disputeCards: document.querySelectorAll('.dispute-candidate-card').length,
+    pageText: document.body.innerText,
   })`);
   check(
     'no-crisis-on-plain-export',
     Boolean(crisisHidden.hidden) && crisisHidden.text === '',
-    JSON.stringify(crisisHidden),
+    JSON.stringify({ hidden: crisisHidden.hidden, text: crisisHidden.text }),
+  );
+  check(
+    'no-succession-workspace',
+    Boolean(crisisHidden.workspaceHidden) && crisisHidden.disputeCards === 0,
+    JSON.stringify({
+      workspaceHidden: crisisHidden.workspaceHidden,
+      disputeCards: crisisHidden.disputeCards,
+    }),
+  );
+  check(
+    'no-vacancy-copy',
+    !crisisHidden.pageText.includes('통치자 공석') && !crisisHidden.pageText.includes('후보 A'),
+    'plain export showed succession copy',
   );
 
   await cdp.eval(`document.querySelector('[data-territory-id="${otherCapital}"]')?.click()`);

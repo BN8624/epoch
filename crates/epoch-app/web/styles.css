@@ -422,6 +422,144 @@ a:focus-visible {
   border-color: var(--accent);
 }
 
+.succession-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.succession-workspace[hidden],
+.world-context-banner[hidden],
+.crisis-panel[hidden] {
+  display: none;
+}
+
+.dispute-crisis-header {
+  margin-bottom: 0.55rem;
+}
+
+.dispute-crisis-header h1 {
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+  margin-bottom: 0.15rem;
+}
+
+.dispute-facts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.dispute-facts > div {
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dispute-facts dt {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  margin-bottom: 0.1rem;
+}
+
+.dispute-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dispute-candidate-list,
+.dispute-house-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.dispute-candidate-card,
+.dispute-house-card {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--touch-min);
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+}
+
+.dispute-candidate-card:hover,
+.dispute-house-card:hover {
+  filter: brightness(1.06);
+}
+
+.dispute-candidate-card.is-selected,
+.dispute-house-card.is-selected {
+  border-color: var(--selected-ring);
+  background: var(--accent-soft);
+}
+
+.dispute-candidate-card.is-priority {
+  border-color: var(--accent);
+}
+
+.dispute-card-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.dispute-slot {
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.dispute-candidate-card .card-name,
+.dispute-house-card .card-name {
+  font-size: 1.02rem;
+  margin-bottom: 0.2rem;
+}
+
+.dispute-detail {
+  margin-top: 0.75rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+.dispute-detail h3 {
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.world-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.world-context-banner .section-head {
+  margin-bottom: 0;
+}
+
+@media (min-width: 720px) {
+  .dispute-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dispute-candidate-list,
+  .dispute-house-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 860px) {
   .workspace {
     grid-template-columns: minmax(0, 1fr);

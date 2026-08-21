@@ -10,12 +10,64 @@
     <a class="skip-link" href="#workspace">본문으로 건너뛰기</a>
 
     <div class="page">
+      <section id="succession-workspace" class="succession-workspace" hidden>
+        <section
+          id="dispute-crisis"
+          class="panel dispute-crisis"
+          aria-labelledby="dispute-crisis-heading"
+        ></section>
+
+        <section class="panel" aria-labelledby="dispute-candidates-heading">
+          <div class="section-head">
+            <h2 id="dispute-candidates-heading">계승 후보</h2>
+            <p class="section-help">카드를 선택하면 권리와 혈통을 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
+          </div>
+          <div
+            id="dispute-candidate-list"
+            class="dispute-candidate-list"
+            role="listbox"
+            aria-label="계승 후보"
+          ></div>
+          <div
+            id="dispute-candidate-detail"
+            class="dispute-detail"
+            aria-live="polite"
+          ></div>
+        </section>
+
+        <section class="panel" aria-labelledby="dispute-houses-heading">
+          <div class="section-head">
+            <h2 id="dispute-houses-heading">유력 가문 맥락</h2>
+            <p class="section-help">가문을 선택하면 수장 상태와 실제 관계·정보를 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
+          </div>
+          <div
+            id="dispute-house-list"
+            class="dispute-house-list"
+            role="listbox"
+            aria-label="유력 가문 맥락"
+          ></div>
+          <div
+            id="dispute-house-detail"
+            class="dispute-detail"
+            aria-live="polite"
+          ></div>
+        </section>
+      </section>
+
       <header class="summary" aria-label="세계 요약">
         <p class="eyebrow">EPOCH</p>
-        <h1>세계 관찰</h1>
+        <h1 id="page-title">세계 관찰</h1>
         <p id="world-seed" class="summary-seed"></p>
         <ul id="world-stats" class="summary-stats"></ul>
       </header>
+
+      <section id="world-context" class="world-context">
+        <div id="world-context-banner" class="panel world-context-banner" hidden>
+          <div class="section-head">
+            <h2 id="world-context-heading">세계 맥락</h2>
+            <p class="section-help">지도와 인물 관찰은 분쟁 화면의 보조 정보입니다.</p>
+          </div>
+        </div>
 
       <main id="workspace" class="workspace" tabindex="-1">
         <section class="panel map-panel" aria-labelledby="map-heading">
@@ -76,6 +128,7 @@
           </section>
         </div>
       </main>
+      </section>
     </div>
 
     <script type="module" src="app.js"></script>
