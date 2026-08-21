@@ -10,125 +10,127 @@
     <a class="skip-link" href="#workspace">본문으로 건너뛰기</a>
 
     <div class="page">
-      <section id="succession-workspace" class="succession-workspace" hidden>
-        <section
-          id="dispute-crisis"
-          class="panel dispute-crisis"
-          aria-labelledby="dispute-crisis-heading"
-        ></section>
-
-        <section class="panel" aria-labelledby="dispute-candidates-heading">
-          <div class="section-head">
-            <h2 id="dispute-candidates-heading">계승 후보</h2>
-            <p class="section-help">카드를 선택하면 권리와 혈통을 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
-          </div>
-          <div
-            id="dispute-candidate-list"
-            class="dispute-candidate-list"
-            role="listbox"
-            aria-label="계승 후보"
-          ></div>
-          <div
-            id="dispute-candidate-detail"
-            class="dispute-detail"
-            aria-live="polite"
-          ></div>
-        </section>
-
-        <section class="panel" aria-labelledby="dispute-houses-heading">
-          <div class="section-head">
-            <h2 id="dispute-houses-heading">유력 가문 맥락</h2>
-            <p class="section-help">가문을 선택하면 수장 상태와 실제 관계·정보를 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
-          </div>
-          <div
-            id="dispute-house-list"
-            class="dispute-house-list"
-            role="listbox"
-            aria-label="유력 가문 맥락"
-          ></div>
-          <div
-            id="dispute-house-detail"
-            class="dispute-detail"
-            aria-live="polite"
-          ></div>
-        </section>
-      </section>
-
-      <header class="summary" aria-label="세계 요약">
-        <p class="eyebrow">EPOCH</p>
-        <h1 id="page-title">세계 관찰</h1>
-        <p id="world-seed" class="summary-seed"></p>
-        <ul id="world-stats" class="summary-stats"></ul>
-      </header>
-
-      <section id="world-context" class="world-context">
-        <div id="world-context-banner" class="panel world-context-banner" hidden>
-          <div class="section-head">
-            <h2 id="world-context-heading">세계 맥락</h2>
-            <p class="section-help">지도와 인물 관찰은 분쟁 화면의 보조 정보입니다.</p>
-          </div>
-        </div>
-
-      <main id="workspace" class="workspace" tabindex="-1">
-        <section class="panel map-panel" aria-labelledby="map-heading">
-          <div class="section-head">
-            <h2 id="map-heading">지도</h2>
-            <p class="section-help">영지를 선택하면 해당 Realm이 열립니다.</p>
-          </div>
-          <div
-            id="world-map"
-            class="map-grid"
-            role="group"
-            aria-label="6칸 곱하기 6칸 영지 지도"
-          ></div>
-        </section>
-
-        <div class="detail-column">
+      <main id="workspace" tabindex="-1">
+        <section id="succession-workspace" class="succession-workspace" hidden>
           <section
-            id="crisis-panel"
-            class="panel crisis-panel"
-            aria-labelledby="crisis-heading"
-            hidden
-          >
+            id="dispute-crisis"
+            class="panel dispute-crisis"
+            aria-labelledby="dispute-crisis-heading"
+          ></section>
+
+          <section class="panel" aria-labelledby="dispute-candidates-heading">
             <div class="section-head">
-              <h2 id="crisis-heading">계승 위기</h2>
+              <h2 id="dispute-candidates-heading">계승 후보</h2>
+              <p class="section-help">카드를 선택하면 권리와 혈통을 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
             </div>
-            <div id="succession-crisis" class="succession-crisis"></div>
+            <div
+              id="dispute-candidate-list"
+              class="dispute-candidate-list"
+              role="listbox"
+              aria-label="계승 후보"
+            ></div>
+            <div
+              id="dispute-candidate-detail"
+              class="dispute-detail"
+              aria-live="polite"
+            ></div>
           </section>
 
-          <section class="panel" aria-labelledby="realm-heading">
+          <section class="panel" aria-labelledby="dispute-houses-heading">
             <div class="section-head">
-              <h2 id="realm-heading">Realm</h2>
+              <h2 id="dispute-houses-heading">유력 가문 맥락</h2>
+              <p class="section-help">가문을 선택하면 수장 상태와 실제 관계·정보를 확인할 수 있습니다. 키보드: 화살표, Home, End.</p>
             </div>
-            <div id="realm-detail" class="realm-detail"></div>
+            <div
+              id="dispute-house-list"
+              class="dispute-house-list"
+              role="listbox"
+              aria-label="유력 가문 맥락"
+            ></div>
+            <div
+              id="dispute-house-detail"
+              class="dispute-detail"
+              aria-live="polite"
+            ></div>
           </section>
+        </section>
 
-          <section class="panel" aria-labelledby="houses-heading">
-            <div class="section-head">
-              <h2 id="houses-heading">가문</h2>
-              <p class="section-help">가문을 선택하면 구성원과 관계를 볼 수 있습니다.</p>
-            </div>
-            <div id="house-list" class="house-list"></div>
-            <div id="house-relations" class="house-relations"></div>
-          </section>
+        <header class="summary" aria-label="세계 요약">
+          <p class="eyebrow">EPOCH</p>
+          <h1 id="page-title">세계 관찰</h1>
+          <p id="world-seed" class="summary-seed"></p>
+          <ul id="world-stats" class="summary-stats"></ul>
+        </header>
 
-          <section class="panel" aria-labelledby="persons-heading">
+        <section id="world-context" class="world-context">
+          <div id="world-context-banner" class="panel world-context-banner" hidden>
             <div class="section-head">
-              <h2 id="persons-heading">인물</h2>
-              <p class="section-help">인물을 선택하면 권리와 그 인물이 아는 정보만 표시됩니다.</p>
+              <h2 id="world-context-heading">세계 맥락</h2>
+              <p class="section-help">지도와 인물 관찰은 분쟁 화면의 보조 정보입니다.</p>
             </div>
-            <div id="person-list" class="person-list"></div>
-          </section>
+          </div>
 
-          <section class="panel" aria-labelledby="person-detail-heading">
-            <div class="section-head">
-              <h2 id="person-detail-heading">선택한 인물</h2>
+          <div class="workspace">
+            <section class="panel map-panel" aria-labelledby="map-heading">
+              <div class="section-head">
+                <h2 id="map-heading">지도</h2>
+                <p class="section-help">영지를 선택하면 해당 Realm이 열립니다.</p>
+              </div>
+              <div
+                id="world-map"
+                class="map-grid"
+                role="group"
+                aria-label="6칸 곱하기 6칸 영지 지도"
+              ></div>
+            </section>
+
+            <div class="detail-column">
+              <section
+                id="crisis-panel"
+                class="panel crisis-panel"
+                aria-labelledby="crisis-heading"
+                hidden
+              >
+                <div class="section-head">
+                  <h2 id="crisis-heading">계승 위기</h2>
+                </div>
+                <div id="succession-crisis" class="succession-crisis"></div>
+              </section>
+
+              <section class="panel" aria-labelledby="realm-heading">
+                <div class="section-head">
+                  <h2 id="realm-heading">Realm</h2>
+                </div>
+                <div id="realm-detail" class="realm-detail"></div>
+              </section>
+
+              <section class="panel" aria-labelledby="houses-heading">
+                <div class="section-head">
+                  <h2 id="houses-heading">가문</h2>
+                  <p class="section-help">가문을 선택하면 구성원과 관계를 볼 수 있습니다.</p>
+                </div>
+                <div id="house-list" class="house-list"></div>
+                <div id="house-relations" class="house-relations"></div>
+              </section>
+
+              <section class="panel" aria-labelledby="persons-heading">
+                <div class="section-head">
+                  <h2 id="persons-heading">인물</h2>
+                  <p class="section-help">인물을 선택하면 권리와 그 인물이 아는 정보만 표시됩니다.</p>
+                </div>
+                <div id="person-list" class="person-list"></div>
+              </section>
+
+              <section class="panel" aria-labelledby="person-detail-heading">
+                <div class="section-head">
+                  <h2 id="person-detail-heading">선택한 인물</h2>
+                </div>
+                <div id="person-detail" class="person-detail" aria-live="polite"></div>
+              </section>
             </div>
-            <div id="person-detail" class="person-detail" aria-live="polite"></div>
-          </section>
-        </div>
+          </div>
+        </section>
       </main>
-      </section>
     </div>
 
     <script type="module" src="app.js"></script>

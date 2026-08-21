@@ -10,7 +10,6 @@ import {
   buildIndexes,
   getInitialSelection,
   getRealmView,
-  getSuccessionCandidateDetail,
   getSuccessionDisputeView,
   getVisibleInformation,
 } from '../view-model.js';
@@ -235,13 +234,23 @@ try {
   const dispute = getSuccessionDisputeView(idx, 'realm-01');
   const realm = getRealmView(idx, 'realm-01');
   const initial = getInitialSelection(idx);
-  const formerName = idx.personById[succession.transition.death.person_id].name;
+  const persons = world.context_world.political.dynastic.population.persons;
+  const claims = world.rights.claims;
+  const derivedClaims = succession.pre_succession_world.propagation.derived_claims;
+  const rawCandidates = succession.transition.candidates;
+  const rawA = rawCandidates.find((item) => item.priority === 'direct_strong_original');
+  const rawB = rawCandidates.find((item) => item.priority === 'restored_contested_original');
+  const rawC = rawCandidates.find((item) => item.priority === 'restored_contested_derived');
+  const derivedRecord = derivedClaims.find((item) => item.id === rawC.claim_record_id);
+  const sourceClaim = claims.find((item) => item.id === derivedRecord.source_claim_id);
+  const childOfC = persons.find((item) => item.id === rawC.person_id);
+  const sourcePerson = persons.find((item) => item.id === sourceClaim.claimant_person_id);
+  const formerName = persons.find(
+    (item) => item.id === succession.transition.death.person_id,
+  ).name;
   const candA = dispute.candidateA;
   const candB = dispute.candidateB;
   const candC = dispute.candidateC;
-  const hiddenPrivateIds = idx.layers.context.information
-    .filter((item) => item.scope === 'private')
-    .map((item) => item.id);
 
   site = await startStaticServer(exportDir);
 
@@ -314,6 +323,10 @@ try {
   );
 
   const snapshot = await cdp.eval(`({
+    skipHref: document.querySelector('.skip-link')?.getAttribute('href'),
+    mainTag: document.getElementById('workspace')?.tagName,
+    successionInMain: Boolean(document.getElementById('workspace')?.querySelector('#succession-workspace')),
+    worldInMain: Boolean(document.getElementById('workspace')?.querySelector('#world-context')),
     workspaceHidden: document.getElementById('succession-workspace')?.hidden ?? true,
     contextHeading: document.getElementById('world-context-heading')?.textContent.trim(),
     contextBannerHidden: document.getElementById('world-context-banner')?.hidden ?? true,
@@ -349,6 +362,16 @@ try {
     pageText: document.body.innerText,
   })`);
 
+  check('skip-to-main', snapshot.skipHref === '#workspace', snapshot.skipHref);
+  check(
+    'main-contains-primary',
+    snapshot.mainTag === 'MAIN' && snapshot.successionInMain && snapshot.worldInMain,
+    JSON.stringify({
+      mainTag: snapshot.mainTag,
+      successionInMain: snapshot.successionInMain,
+      worldInMain: snapshot.worldInMain,
+    }),
+  );
   check('workspace-visible', snapshot.workspaceHidden === false, String(snapshot.workspaceHidden));
   check('world-context-visible', snapshot.contextBannerHidden === false, String(snapshot.contextBannerHidden));
   check('world-context-title', snapshot.contextHeading === '세계 맥락', snapshot.contextHeading);
@@ -395,12 +418,29 @@ try {
     Boolean(shownC?.text.includes('혈통을 따라 파생된 복권 권리')),
     shownC?.text,
   );
+  check('raw-c-claim', rawC.claim_record_id === 'derived-claim-01', rawC.claim_record_id);
+  check('raw-c-source-claim', derivedRecord.source_claim_id === sourceClaim.id, derivedRecord.source_claim_id);
+  check('raw-c-source-is-b', sourceClaim.claimant_person_id === rawB.person_id, sourceClaim.claimant_person_id);
+  check(
+    'raw-c-via-parent',
+    derivedRecord.via_parent_person_id === sourceClaim.claimant_person_id,
+    derivedRecord.via_parent_person_id,
+  );
+  check(
+    'raw-c-parentage',
+    (childOfC.known_parent_ids ?? []).includes(sourceClaim.claimant_person_id),
+    JSON.stringify(childOfC.known_parent_ids),
+  );
   check(
     'derived-source',
-    snapshot.derivedSource === candC.provenance.sourcePersonId,
-    `${snapshot.derivedSource} != ${candC.provenance.sourcePersonId}`,
+    snapshot.derivedSource === sourceClaim.claimant_person_id,
+    `${snapshot.derivedSource} != ${sourceClaim.claimant_person_id}`,
   );
-  check('derived-lineage', snapshot.derivedLineage === candC.provenance.sentence, snapshot.derivedLineage);
+  check(
+    'derived-lineage',
+    snapshot.derivedLineage === `${sourcePerson.name}의 자녀로서 복권 권리가 한 세대 전파됨`,
+    snapshot.derivedLineage,
+  );
   check('priority-name', shownA?.name === idx.personById[candA.personId].name, shownA?.name);
   check('restored-name', shownB?.name === idx.personById[candB.personId].name, shownB?.name);
   check('derived-name', shownC?.name === idx.personById[candC.personId].name, shownC?.name);
@@ -426,7 +466,7 @@ try {
   );
 
   await cdp.eval(
-    `document.querySelector('.dispute-candidate-card[data-person-id="${candB.personId}"]')?.click()`,
+    `document.querySelector('.dispute-candidate-card[data-person-id="${rawB.person_id}"]')?.click()`,
   );
   await sleep(150);
   const afterClick = await cdp.eval(`({
@@ -438,50 +478,91 @@ try {
       : null,
     aria: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('aria-selected'),
   })`);
-  check('candidate-selectable', afterClick.disputeSelected === candB.personId, JSON.stringify(afterClick));
+  check('candidate-selectable', afterClick.disputeSelected === rawB.person_id, JSON.stringify(afterClick));
   check(
     'candidate-detail-changes',
-    afterClick.disputeDetail === idx.personById[candB.personId].name,
+    afterClick.disputeDetail === persons.find((item) => item.id === rawB.person_id).name,
     afterClick.disputeDetail,
   );
-  check('observer-person-synced', afterClick.observerSelected === candB.personId, afterClick.observerSelected);
-  check('candidate-focus', afterClick.focus === candB.personId, afterClick.focus);
+  check('observer-person-synced', afterClick.observerSelected === rawB.person_id, afterClick.observerSelected);
+  check('candidate-focus', afterClick.focus === rawB.person_id, afterClick.focus);
   check('candidate-aria', afterClick.aria === 'true', afterClick.aria);
 
+  async function rovingState(listSelector, idAttr) {
+    return cdp.eval(`(() => {
+      const cards = [...document.querySelectorAll(${JSON.stringify(listSelector)})];
+      const selected = cards.find((el) => el.getAttribute('aria-selected') === 'true');
+      const focus = document.activeElement;
+      return {
+        ids: cards.map((el) => el.getAttribute(${JSON.stringify(idAttr)})),
+        selectedId: selected?.getAttribute(${JSON.stringify(idAttr)}) ?? null,
+        tabIndexes: cards.map((el) => el.tabIndex),
+        aria: cards.map((el) => el.getAttribute('aria-selected')),
+        focusId: focus?.getAttribute(${JSON.stringify(idAttr)}) ?? null,
+        focusMatches: Boolean(focus?.matches(${JSON.stringify(listSelector)})),
+      };
+    })()`);
+  }
+
+  function checkRoving(label, state, expectedId) {
+    const selectedIndex = state.ids.indexOf(expectedId);
+    check(`${label}-selected`, state.selectedId === expectedId, JSON.stringify(state));
+    check(
+      `${label}-focus`,
+      state.focusId === expectedId && state.focusMatches,
+      JSON.stringify(state),
+    );
+    check(
+      `${label}-tabindex`,
+      selectedIndex >= 0 &&
+        state.tabIndexes.length === 3 &&
+        state.tabIndexes.every((value, index) => (index === selectedIndex ? value === 0 : value === -1)),
+      JSON.stringify(state.tabIndexes),
+    );
+    check(
+      `${label}-aria`,
+      selectedIndex >= 0 &&
+        state.aria.every((value, index) => (index === selectedIndex ? value === 'true' : value === 'false')),
+      JSON.stringify(state.aria),
+    );
+  }
+
+  async function press(key, code, vk) {
+    await cdp.key(key, code, vk);
+    await sleep(120);
+  }
+
+  const candidateIds = [rawA.person_id, rawB.person_id, rawC.person_id];
   await cdp.eval(
-    `document.querySelector('.dispute-candidate-card[data-person-id="${candB.personId}"]')?.focus()`,
+    `document.querySelector('.dispute-candidate-card[data-person-id="${rawA.person_id}"]')?.click()`,
   );
-  await cdp.key('End', 'End', 35);
-  await sleep(150);
-  const afterEnd = await cdp.eval(`({
-    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
-    focus: document.activeElement?.getAttribute('data-person-id'),
-  })`);
-  check('keyboard-end', afterEnd.selected === candC.personId, JSON.stringify(afterEnd));
-  check('keyboard-end-focus', afterEnd.focus === candC.personId, afterEnd.focus);
-
-  await cdp.key('Home', 'Home', 36);
-  await sleep(150);
-  const afterHome = await cdp.eval(`({
-    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
-    focus: document.activeElement?.getAttribute('data-person-id'),
-  })`);
-  check('keyboard-home', afterHome.selected === candA.personId, JSON.stringify(afterHome));
-
-  await cdp.key('ArrowRight', 'ArrowRight', 39);
-  await sleep(150);
-  const afterArrow = await cdp.eval(`({
-    selected: document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id'),
-    focus: document.activeElement?.getAttribute('data-person-id'),
-  })`);
-  check('keyboard-arrow', afterArrow.selected === candB.personId, JSON.stringify(afterArrow));
-
-  await cdp.key('Enter', 'Enter', 13);
-  await sleep(150);
-  const afterEnter = await cdp.eval(
-    `document.querySelector('.dispute-candidate-card.is-selected')?.getAttribute('data-person-id')`,
+  await sleep(120);
+  await cdp.eval(
+    `document.querySelector('.dispute-candidate-card[data-person-id="${rawA.person_id}"]')?.focus()`,
   );
-  check('keyboard-enter', afterEnter === candB.personId, afterEnter);
+  checkRoving('cand-start', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[0]);
+  await press('ArrowRight', 'ArrowRight', 39);
+  checkRoving('cand-right', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[1]);
+  await press('ArrowDown', 'ArrowDown', 40);
+  checkRoving('cand-down', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[2]);
+  await press('ArrowLeft', 'ArrowLeft', 37);
+  checkRoving('cand-left', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[1]);
+  await press('ArrowUp', 'ArrowUp', 38);
+  checkRoving('cand-up', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[0]);
+  await press('End', 'End', 35);
+  checkRoving('cand-end', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[2]);
+  await press('Home', 'Home', 36);
+  checkRoving('cand-home', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[0]);
+  await cdp.eval(
+    `document.querySelector('.dispute-candidate-card[data-person-id="${candidateIds[1]}"]')?.focus()`,
+  );
+  await press('Enter', 'Enter', 13);
+  checkRoving('cand-enter', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[1]);
+  await cdp.eval(
+    `document.querySelector('.dispute-candidate-card[data-person-id="${candidateIds[2]}"]')?.focus()`,
+  );
+  await press(' ', 'Space', 32);
+  checkRoving('cand-space', await rovingState('.dispute-candidate-card', 'data-person-id'), candidateIds[2]);
 
   await cdp.eval(`document.querySelector('.dispute-house-card[data-house-id="house-03"]')?.click()`);
   await sleep(150);
@@ -504,21 +585,143 @@ try {
     afterHouse.detail.slice(0, 240),
   );
 
-  await cdp.eval(`document.querySelector('.dispute-house-card[data-house-id="house-03"]')?.focus()`);
-  await cdp.key('Home', 'Home', 36);
-  await sleep(150);
-  const houseHome = await cdp.eval(`({
-    selected: document.querySelector('.dispute-house-card.is-selected')?.getAttribute('data-house-id'),
-    focus: document.activeElement?.getAttribute('data-house-id'),
-  })`);
-  check('house-keyboard-home', houseHome.selected === snapshot.houses[0].houseId, JSON.stringify(houseHome));
-
-  await cdp.key(' ', 'Space', 32);
-  await sleep(150);
-  const houseSpace = await cdp.eval(
-    `document.querySelector('.dispute-house-card.is-selected')?.getAttribute('data-house-id')`,
+  const houseIds = snapshot.houses.map((item) => item.houseId);
+  await cdp.eval(
+    `document.querySelector('.dispute-house-card[data-house-id="${houseIds[0]}"]')?.click()`,
   );
-  check('house-keyboard-space', houseSpace === snapshot.houses[0].houseId, houseSpace);
+  await sleep(120);
+  await cdp.eval(
+    `document.querySelector('.dispute-house-card[data-house-id="${houseIds[0]}"]')?.focus()`,
+  );
+  checkRoving('house-start', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[0]);
+  await press('ArrowRight', 'ArrowRight', 39);
+  checkRoving('house-right', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[1]);
+  await press('ArrowDown', 'ArrowDown', 40);
+  checkRoving('house-down', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[2]);
+  await press('ArrowLeft', 'ArrowLeft', 37);
+  checkRoving('house-left', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[1]);
+  await press('ArrowUp', 'ArrowUp', 38);
+  checkRoving('house-up', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[0]);
+  await press('End', 'End', 35);
+  checkRoving('house-end', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[2]);
+  await press('Home', 'Home', 36);
+  checkRoving('house-home', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[0]);
+  await cdp.eval(
+    `document.querySelector('.dispute-house-card[data-house-id="${houseIds[2]}"]')?.focus()`,
+  );
+  await press('Enter', 'Enter', 13);
+  checkRoving('house-enter', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[2]);
+  await cdp.eval(
+    `document.querySelector('.dispute-house-card[data-house-id="${houseIds[1]}"]')?.focus()`,
+  );
+  await press(' ', 'Space', 32);
+  checkRoving('house-space', await rovingState('.dispute-house-card', 'data-house-id'), houseIds[1]);
+
+  async function renderedInfo(rootSelector) {
+    const selector = rootSelector + ' .info-card[data-info-id]';
+    return cdp.eval(
+      '(function(){var nodes=document.querySelectorAll(' +
+        JSON.stringify(selector) +
+        ');var out=[];for(var i=0;i<nodes.length;i++){var el=nodes[i];out.push({id:el.getAttribute("data-info-id"),topic:el.getAttribute("data-info-topic"),scope:el.getAttribute("data-info-scope"),confidence:el.getAttribute("data-info-confidence"),text:el.innerText});}return out;})()',
+    );
+  }
+
+  async function rootHtml(rootSelector) {
+    return cdp.eval(
+      'document.querySelector(' + JSON.stringify(rootSelector) + ') ? document.querySelector(' + JSON.stringify(rootSelector) + ').innerHTML : ""',
+    );
+  }
+
+  function assertExactInfo(label, rendered, personId, html) {
+    const expected = getVisibleInformation(idx, personId);
+    const expectedIds = expected.map((item) => item.id).sort();
+    const gotIds = rendered.map((item) => item.id).sort();
+    check(`${label}-ids`, JSON.stringify(gotIds) === JSON.stringify(expectedIds), JSON.stringify({ gotIds, expectedIds }));
+    const hiddenIds = idx.layers.context.information
+      .filter((item) => !expectedIds.includes(item.id))
+      .map((item) => item.id);
+    for (const infoId of hiddenIds) {
+      check(`${label}-hidden:${infoId}`, !html.includes(infoId), infoId);
+    }
+    return { rendered, expected };
+  }
+
+  for (const candidate of [rawA, rawB, rawC]) {
+    await cdp.eval(
+      `document.querySelector('.dispute-candidate-card[data-person-id="${candidate.person_id}"]')?.click()`,
+    );
+    await sleep(120);
+    const rendered = await renderedInfo('#dispute-candidate-detail');
+    const html = await rootHtml('#dispute-candidate-detail');
+    assertExactInfo(`candidate-${candidate.person_id}`, rendered, candidate.person_id, html);
+  }
+
+  const publicInfo = idx.layers.context.information.filter((item) => item.scope === 'public');
+  check('public-info-exists', publicInfo.length > 0, String(publicInfo.length));
+  const houseHeads = {
+    'house-01': idx.houseById['house-01'].head_person_id,
+    'house-02': idx.houseById['house-02'].head_person_id,
+    'house-03': idx.houseById['house-03'].head_person_id,
+  };
+  for (const [houseId, headId] of Object.entries(houseHeads)) {
+    await cdp.eval(`document.querySelector('.dispute-house-card[data-house-id="${houseId}"]')?.click()`);
+    await sleep(120);
+    const rendered = await renderedInfo('#dispute-house-detail');
+    const html = await rootHtml('#dispute-house-detail');
+    const { expected } = assertExactInfo(`house-${houseId}`, rendered, headId, html);
+    for (const item of publicInfo) {
+      check(
+        `house-${houseId}-public:${item.id}`,
+        expected.some((visible) => visible.id === item.id) &&
+          rendered.some((card) => card.id === item.id && card.scope === 'public'),
+        item.id,
+      );
+    }
+    const confirmedConflict = expected.filter(
+      (item) => item.topic === 'promise_conflict' && item.confidence === 'confirmed',
+    );
+    const rumor = expected.filter(
+      (item) => item.topic === 'promise_conflict' && item.confidence === 'unverified',
+    );
+    if (houseId === 'house-01') {
+      check(
+        'house01-confirmed-conflict',
+        confirmedConflict.length > 0 &&
+          rendered.some(
+            (card) =>
+              card.topic === 'promise_conflict' &&
+              card.confidence === 'confirmed' &&
+              card.text.includes('같은 평의회 자리를 두 가문에'),
+          ),
+        JSON.stringify(rendered),
+      );
+    }
+    if (houseId === 'house-02') {
+      check(
+        'house02-rumor-only',
+        rumor.length > 0 &&
+          confirmedConflict.length === 0 &&
+          rendered.some(
+            (card) =>
+              card.topic === 'promise_conflict' &&
+              card.confidence === 'unverified' &&
+              card.text.includes('소문'),
+          ) &&
+          !rendered.some((card) => card.topic === 'promise_conflict' && card.confidence === 'confirmed'),
+        JSON.stringify(rendered),
+      );
+    }
+    if (houseId === 'house-03') {
+      check(
+        'house03-unknown-head',
+        !expected.some((item) => item.topic === 'promise_conflict') &&
+          !rendered.some((card) => card.topic === 'promise_conflict') &&
+          !html.includes('같은 평의회 자리를 두 가문에') &&
+          !html.includes('소문'),
+        html.slice(0, 240),
+      );
+    }
+  }
 
   const pageTextNow = await cdp.eval(`document.body.innerText`);
   const htmlNow = await cdp.eval(`document.documentElement.outerHTML`);
@@ -560,21 +763,18 @@ try {
     check(`no-action-ui:${phrase}`, !pageTextNow.includes(phrase));
   }
   check('no-support-invention', !/공개 지지|A 지지|B 지지|C 지지/.test(pageTextNow), 'support copy present');
-  for (const infoId of hiddenPrivateIds) {
-    check(`no-private-id:${infoId}`, !htmlNow.includes(infoId), infoId);
-  }
-  const candAVisible = getVisibleInformation(idx, candA.personId).map((item) => item.id);
-  const candAHidden = idx.layers.context.information
-    .filter((item) => item.scope === 'private' && !candAVisible.includes(item.id))
-    .map((item) => item.id);
-  const candADetail = getSuccessionCandidateDetail(idx, 'realm-01', candA.personId);
-  check(
-    'candidate-a-privacy-set',
-    JSON.stringify(candADetail.information.map((item) => item.id).sort()) ===
-      JSON.stringify(candAVisible.sort()),
-    JSON.stringify(candADetail.information.map((item) => item.id)),
+  const visibleNow = new Set(
+    [
+      ...getVisibleInformation(idx, rawA.person_id),
+      ...getVisibleInformation(idx, rawB.person_id),
+      ...getVisibleInformation(idx, rawC.person_id),
+      ...Object.values(houseHeads).flatMap((headId) => getVisibleInformation(idx, headId)),
+    ].map((item) => item.id),
   );
-  check('candidate-a-hidden-private', candAHidden.length > 0 || candAVisible.length >= 0, 'privacy fixture missing');
+  for (const item of idx.layers.context.information) {
+    if (visibleNow.has(item.id)) continue;
+    check(`no-hidden-info-id:${item.id}`, !htmlNow.includes(item.id), item.id);
+  }
 
   async function measure(w, h) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {

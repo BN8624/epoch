@@ -26,8 +26,55 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
-function displayName(value) {
-  return value ? escapeHtml(value) : '기록 없음';
+function requiredText(value, field) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`계승 분쟁 필수 값이 없습니다: ${field}`);
+  }
+  return escapeHtml(value);
+}
+
+function assertRenderableDispute(dispute) {
+  if (!dispute || dispute.unresolved) {
+    throw new Error('계승 분쟁 투영이 불완전합니다');
+  }
+  if (
+    !dispute.realmName ||
+    !dispute.formerIncumbentName ||
+    dispute.candidates.length !== 3 ||
+    dispute.houses.length !== 3
+  ) {
+    throw new Error('계승 분쟁 필수 필드가 없습니다');
+  }
+  for (const candidate of dispute.candidates) {
+    if (
+      candidate.unresolved ||
+      !candidate.slot ||
+      !candidate.slotLabel ||
+      !candidate.personName ||
+      !candidate.houseName ||
+      !candidate.standingLabel ||
+      !candidate.claimRecordId
+    ) {
+      throw new Error('계승 후보 필수 필드가 없습니다');
+    }
+  }
+  for (const house of dispute.houses) {
+    if (house.unresolved || !house.name) {
+      throw new Error('계승 가문 필수 필드가 없습니다');
+    }
+  }
+}
+
+function infoCardsHtml(items) {
+  if (!items.length) return '';
+  return `<ul class="info-list">${items
+    .map(
+      (item) => `<li class="info-card" data-info-id="${escapeHtml(item.id)}" data-info-scope="${escapeHtml(item.scope)}" data-info-topic="${escapeHtml(item.topic)}" data-info-confidence="${escapeHtml(item.confidence)}">
+            <h3>${escapeHtml(item.badge)}</h3>
+            <p>${escapeHtml(item.body)}</p>
+          </li>`,
+    )
+    .join('')}</ul>`;
 }
 
 function houseHeadLine(idx, house) {
@@ -317,14 +364,7 @@ function renderPersonDetail(idx, state) {
     : '<p class="empty-note">이 인물이 알고 있는 약속이 없습니다.</p>';
 
   const infoHtml = person.information.length
-    ? `<ul class="info-list">${person.information
-        .map(
-          (item) => `<li class="info-card" data-info-scope="${escapeHtml(item.scope)}" data-info-topic="${escapeHtml(item.topic)}" data-info-confidence="${escapeHtml(item.confidence)}">
-            <h3>${escapeHtml(item.badge)}</h3>
-            <p>${escapeHtml(item.body)}</p>
-          </li>`,
-        )
-        .join('')}</ul>`
+    ? infoCardsHtml(person.information)
     : '<p class="empty-note">이 인물에게 보이는 정보가 없습니다.</p>';
 
   root.innerHTML = `
@@ -436,13 +476,13 @@ function renderDisputeCrisis(dispute) {
   if (!root) return;
   root.innerHTML = `
     <header class="dispute-crisis-header">
-      <p class="eyebrow">${displayName(dispute.realmName)}</p>
+      <p class="eyebrow">${requiredText(dispute.realmName, 'realmName')}</p>
       <h1 id="dispute-crisis-heading">계승 분쟁</h1>
     </header>
     <dl class="dispute-facts">
       <div>
         <dt>직전 통치자</dt>
-        <dd data-role="former-incumbent">${displayName(dispute.formerIncumbentName)} · 사망</dd>
+        <dd data-role="former-incumbent">${requiredText(dispute.formerIncumbentName, 'formerIncumbentName')} · 사망</dd>
       </div>
       <div>
         <dt>현재 통치자</dt>
@@ -450,7 +490,7 @@ function renderDisputeCrisis(dispute) {
       </div>
       <div>
         <dt>법적 상태</dt>
-        <dd>${escapeHtml(dispute.legalStatus)}</dd>
+        <dd>${requiredText(dispute.legalStatus, 'legalStatus')}</dd>
       </div>
     </dl>
   `;
@@ -476,25 +516,25 @@ function renderDisputeCandidates(idx, state, dispute) {
         class="${classes}"
         role="option"
         data-person-id="${escapeHtml(candidate.personId)}"
-        data-candidate-slot="${escapeHtml(candidate.slot ?? '')}"
+        data-candidate-slot="${requiredText(candidate.slot, 'candidate.slot')}"
         data-candidate-priority="${escapeHtml(candidate.priority)}"
         data-candidate-origin="${escapeHtml(candidate.origin)}"
-        data-claim-record="${escapeHtml(candidate.claimRecordId)}"
+        data-claim-record="${requiredText(candidate.claimRecordId, 'candidate.claimRecordId')}"
         ${candidate.provenance?.sourcePersonId ? `data-derived-source="${escapeHtml(candidate.provenance.sourcePersonId)}"` : ''}
         aria-selected="${selected ? 'true' : 'false'}"
         tabindex="${selected ? '0' : '-1'}"
         aria-label="${escapeHtml(
-          `${candidate.slotLabel ?? ''} ${candidate.personName ?? ''} ${candidate.standingLabel ?? ''}${selected ? ', 선택됨' : ''}`,
+          `${candidate.slotLabel} ${candidate.personName} ${candidate.standingLabel}${selected ? ', 선택됨' : ''}`,
         )}"
       >
         <span class="dispute-card-kicker">
-          <span class="dispute-slot">${escapeHtml(candidate.slotLabel ?? '')}</span>
+          <span class="dispute-slot">${requiredText(candidate.slotLabel, 'candidate.slotLabel')}</span>
           ${selected ? '<span class="selection-mark">선택됨</span>' : ''}
         </span>
-        <div class="card-name">${displayName(candidate.personName)}</div>
-        <div class="card-meta">${displayName(candidate.houseName)}</div>
-        <div class="card-meta">${escapeHtml(candidate.standingLabel ?? '')}</div>
-        <div class="card-meta">${escapeHtml(candidate.generationLabel ?? '')} · ${escapeHtml(candidate.activityLabel ?? '')}</div>
+        <div class="card-name">${requiredText(candidate.personName, 'candidate.personName')}</div>
+        <div class="card-meta">${requiredText(candidate.houseName, 'candidate.houseName')}</div>
+        <div class="card-meta">${requiredText(candidate.standingLabel, 'candidate.standingLabel')}</div>
+        <div class="card-meta">${requiredText(candidate.generationLabel, 'candidate.generationLabel')} · ${requiredText(candidate.activityLabel, 'candidate.activityLabel')}</div>
         ${candidate.badge ? `<div class="badge-row"><span class="badge">${escapeHtml(candidate.badge)}</span></div>` : ''}
         ${
           candidate.isPriority && candidate.isKnownChildOfFormer
@@ -536,15 +576,11 @@ function renderDisputeCandidates(idx, state, dispute) {
     detailRoot.innerHTML = '<p class="empty-note">후보를 선택하면 상세가 표시됩니다.</p>';
     return;
   }
+  if (detail.unresolved || !detail.name || !detail.realmName || !detail.houseName) {
+    throw new Error('계승 후보 상세 투영이 불완전합니다');
+  }
   const infoHtml = detail.information.length
-    ? `<ul class="info-list">${detail.information
-        .map(
-          (item) => `<li class="info-card" data-info-scope="${escapeHtml(item.scope)}" data-info-topic="${escapeHtml(item.topic)}" data-info-confidence="${escapeHtml(item.confidence)}">
-            <h3>${escapeHtml(item.badge)}</h3>
-            <p>${escapeHtml(item.body)}</p>
-          </li>`,
-        )
-        .join('')}</ul>`
+    ? infoCardsHtml(detail.information)
     : '<p class="empty-note">이 인물에게 보이는 정보가 없습니다.</p>';
   const promiseHtml = detail.promises.length
     ? `<ul class="promise-list">${detail.promises
@@ -552,29 +588,29 @@ function renderDisputeCandidates(idx, state, dispute) {
         .join('')}</ul>`
     : '<p class="empty-note">이 인물이 알고 있는 약속이 없습니다.</p>';
   detailRoot.innerHTML = `
-    <h3 id="dispute-candidate-detail-title">${displayName(detail.name)}</h3>
+    <h3 id="dispute-candidate-detail-title">${requiredText(detail.name, 'detail.name')}</h3>
     <h3>신분</h3>
     <dl class="fact-list">
-      <dt>이름</dt><dd>${displayName(detail.name)}</dd>
-      <dt>Realm</dt><dd>${displayName(detail.realmName)}</dd>
-      <dt>가문</dt><dd>${displayName(detail.houseName)}</dd>
-      <dt>세대</dt><dd>${escapeHtml(detail.generationLabel ?? '')}</dd>
-      <dt>문화</dt><dd>${escapeHtml(detail.cultureName ?? '')}</dd>
-      <dt>종교</dt><dd>${escapeHtml(detail.religionName ?? '')}</dd>
-      <dt>활동</dt><dd>${escapeHtml(detail.activityLabel ?? '')}</dd>
+      <dt>이름</dt><dd>${requiredText(detail.name, 'detail.name')}</dd>
+      <dt>Realm</dt><dd>${requiredText(detail.realmName, 'detail.realmName')}</dd>
+      <dt>가문</dt><dd>${requiredText(detail.houseName, 'detail.houseName')}</dd>
+      <dt>세대</dt><dd>${requiredText(detail.generationLabel, 'detail.generationLabel')}</dd>
+      <dt>문화</dt><dd>${requiredText(detail.cultureName, 'detail.cultureName')}</dd>
+      <dt>종교</dt><dd>${requiredText(detail.religionName, 'detail.religionName')}</dd>
+      <dt>활동</dt><dd>${requiredText(detail.activityLabel, 'detail.activityLabel')}</dd>
       ${detail.roleLabel ? `<dt>역할</dt><dd>${escapeHtml(detail.roleLabel)}</dd>` : ''}
     </dl>
     <h3>권리</h3>
     <dl class="fact-list">
-      <dt>권리 유형</dt><dd>${escapeHtml(detail.rights.standingLabel ?? '')}</dd>
-      <dt>출처</dt><dd>${escapeHtml(detail.rights.origin ?? '')}</dd>
-      <dt>기록</dt><dd>${escapeHtml(detail.rights.claimRecordId ?? '')}</dd>
-      <dt>법적 우선</dt><dd>${escapeHtml(detail.rights.priorityLabel ?? '')}</dd>
+      <dt>권리 유형</dt><dd>${requiredText(detail.rights.standingLabel, 'detail.rights.standingLabel')}</dd>
+      <dt>출처</dt><dd>${requiredText(detail.rights.origin, 'detail.rights.origin')}</dd>
+      <dt>기록</dt><dd>${requiredText(detail.rights.claimRecordId, 'detail.rights.claimRecordId')}</dd>
+      <dt>법적 우선</dt><dd>${requiredText(detail.rights.priorityLabel, 'detail.rights.priorityLabel')}</dd>
       ${detail.rights.evidenceLabel ? `<dt>근거</dt><dd>${escapeHtml(detail.rights.evidenceLabel)}</dd>` : ''}
-      <dt>세대 거리</dt><dd>${escapeHtml(String(detail.rights.generationDistance ?? ''))}</dd>
+      <dt>세대 거리</dt><dd>${escapeHtml(String(detail.rights.generationDistance))}</dd>
     </dl>
     <h3>혈통</h3>
-    <p>${escapeHtml(detail.lineage.label ?? '')}</p>
+    <p>${requiredText(detail.lineage.label, 'detail.lineage.label')}</p>
     <h3>정치적 맥락</h3>
     ${
       detail.politicalContext.length
@@ -607,15 +643,15 @@ function renderDisputeHouses(idx, state, dispute) {
         data-deceased-head="${house.headStatus?.isDeceasedHead ? 'true' : 'false'}"
         aria-selected="${selected ? 'true' : 'false'}"
         tabindex="${selected ? '0' : '-1'}"
-        aria-label="${escapeHtml(`${house.name ?? ''} ${headLines.join(' ')}${selected ? ', 선택됨' : ''}`)}"
+        aria-label="${escapeHtml(`${house.name} ${headLines.join(' ')}${selected ? ', 선택됨' : ''}`)}"
       >
         <span class="dispute-card-kicker">
-          <span class="card-name">${displayName(house.name)}</span>
+          <span class="card-name">${requiredText(house.name, 'house.name')}</span>
           ${selected ? '<span class="selection-mark">선택됨</span>' : ''}
         </span>
         ${headLines.map((line) => `<div class="card-meta">${escapeHtml(line)}</div>`).join('')}
-        <div class="card-meta">${escapeHtml(house.cultureName ?? '')} · ${escapeHtml(house.religionName ?? '')}</div>
-        <div class="card-meta">${escapeHtml(house.identityStance ?? '')}</div>
+        <div class="card-meta">${requiredText(house.cultureName, 'house.cultureName')} · ${requiredText(house.religionName, 'house.religionName')}</div>
+        <div class="card-meta">${requiredText(house.identityStance, 'house.identityStance')}</div>
         ${house.relationSummary
           .map((line) => `<div class="card-meta">${escapeHtml(line)}</div>`)
           .join('')}
@@ -639,15 +675,11 @@ function renderDisputeHouses(idx, state, dispute) {
     detailRoot.innerHTML = '<p class="empty-note">가문을 선택하면 상세가 표시됩니다.</p>';
     return;
   }
+  if (detail.unresolved || !detail.name || !detail.realmName) {
+    throw new Error('계승 가문 상세 투영이 불완전합니다');
+  }
   const infoHtml = detail.information.length
-    ? `<ul class="info-list">${detail.information
-        .map(
-          (item) => `<li class="info-card" data-info-scope="${escapeHtml(item.scope)}" data-info-topic="${escapeHtml(item.topic)}" data-info-confidence="${escapeHtml(item.confidence)}">
-            <h3>${escapeHtml(item.badge)}</h3>
-            <p>${escapeHtml(item.body)}</p>
-          </li>`,
-        )
-        .join('')}</ul>`
+    ? infoCardsHtml(detail.information)
     : '<p class="empty-note">표시할 정보가 없습니다.</p>';
   const promiseHtml = detail.promises.length
     ? `<ul class="promise-list">${detail.promises
@@ -656,14 +688,14 @@ function renderDisputeHouses(idx, state, dispute) {
     : '<p class="empty-note">표시할 약속이 없습니다.</p>';
   const headLines = detail.headStatus?.detailHeadLines ?? [];
   detailRoot.innerHTML = `
-    <h3 id="dispute-house-detail-title">${displayName(detail.name)}</h3>
+    <h3 id="dispute-house-detail-title">${requiredText(detail.name, 'houseDetail.name')}</h3>
     <dl class="fact-list">
-      <dt>가문</dt><dd>${displayName(detail.name)}</dd>
-      <dt>Realm</dt><dd>${displayName(detail.realmName)}</dd>
+      <dt>가문</dt><dd>${requiredText(detail.name, 'houseDetail.name')}</dd>
+      <dt>Realm</dt><dd>${requiredText(detail.realmName, 'houseDetail.realmName')}</dd>
       <dt>수장</dt><dd>${escapeHtml(headLines.join(' / '))}</dd>
-      <dt>문화</dt><dd>${escapeHtml(detail.cultureName ?? '')}</dd>
-      <dt>종교</dt><dd>${escapeHtml(detail.religionName ?? '')}</dd>
-      <dt>다수 정체성</dt><dd>${escapeHtml(detail.identityStance ?? '')}</dd>
+      <dt>문화</dt><dd>${requiredText(detail.cultureName, 'houseDetail.cultureName')}</dd>
+      <dt>종교</dt><dd>${requiredText(detail.religionName, 'houseDetail.religionName')}</dd>
+      <dt>다수 정체성</dt><dd>${requiredText(detail.identityStance, 'houseDetail.identityStance')}</dd>
     </dl>
     <h3>가문 관계</h3>
     ${
@@ -702,6 +734,7 @@ function renderSuccessionWorkspace(idx, state) {
   workspace.hidden = false;
   if (banner) banner.hidden = false;
   if (pageTitle) pageTitle.textContent = '세계 맥락';
+  assertRenderableDispute(dispute);
   renderDisputeCrisis(dispute);
   renderDisputeCandidates(idx, state, dispute);
   renderDisputeHouses(idx, state, dispute);

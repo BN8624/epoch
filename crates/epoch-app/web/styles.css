@@ -109,6 +109,20 @@ a:focus-visible {
   gap: 0.85rem;
 }
 
+#workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.world-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
 .summary {
   background: var(--bg-panel);
   border: 1px solid var(--border);
