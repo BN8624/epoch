@@ -40,6 +40,8 @@ function assertRenderableDispute(dispute) {
   if (
     !dispute.realmName ||
     !dispute.formerIncumbentName ||
+    !dispute.vacant ||
+    !dispute.vacancyLabel ||
     dispute.candidates.length !== 3 ||
     dispute.houses.length !== 3
   ) {
@@ -65,12 +67,12 @@ function assertRenderableDispute(dispute) {
   }
 }
 
-function infoCardsHtml(items) {
+function infoCardsHtml(items, headingLevel = 'h3') {
   if (!items.length) return '';
   return `<ul class="info-list">${items
     .map(
       (item) => `<li class="info-card" data-info-id="${escapeHtml(item.id)}" data-info-scope="${escapeHtml(item.scope)}" data-info-topic="${escapeHtml(item.topic)}" data-info-confidence="${escapeHtml(item.confidence)}">
-            <h3>${escapeHtml(item.badge)}</h3>
+            <${headingLevel}>${escapeHtml(item.badge)}</${headingLevel}>
             <p>${escapeHtml(item.body)}</p>
           </li>`,
     )
@@ -83,6 +85,20 @@ function houseHeadLine(idx, house) {
     return `기존 수장 ${house.headName} · 사망 · 현재 수장 미결정`;
   }
   return `수장 ${house.headName}`;
+}
+
+function setPageTitle(text, level) {
+  const current = document.getElementById('page-title');
+  if (!current) return;
+  if (current.tagName.toLowerCase() !== level) {
+    const replacement = document.createElement(level);
+    replacement.id = 'page-title';
+    replacement.className = current.className;
+    current.replaceWith(replacement);
+    replacement.textContent = text;
+    return;
+  }
+  current.textContent = text;
 }
 
 function disputeRealmId(idx) {
@@ -486,7 +502,7 @@ function renderDisputeCrisis(dispute) {
       </div>
       <div>
         <dt>현재 통치자</dt>
-        <dd data-role="vacancy">공석</dd>
+        <dd data-role="vacancy">${requiredText(dispute.vacancyLabel, 'vacancyLabel')}</dd>
       </div>
       <div>
         <dt>법적 상태</dt>
@@ -580,7 +596,7 @@ function renderDisputeCandidates(idx, state, dispute) {
     throw new Error('계승 후보 상세 투영이 불완전합니다');
   }
   const infoHtml = detail.information.length
-    ? infoCardsHtml(detail.information)
+    ? infoCardsHtml(detail.information, 'h5')
     : '<p class="empty-note">이 인물에게 보이는 정보가 없습니다.</p>';
   const promiseHtml = detail.promises.length
     ? `<ul class="promise-list">${detail.promises
@@ -589,7 +605,7 @@ function renderDisputeCandidates(idx, state, dispute) {
     : '<p class="empty-note">이 인물이 알고 있는 약속이 없습니다.</p>';
   detailRoot.innerHTML = `
     <h3 id="dispute-candidate-detail-title">${requiredText(detail.name, 'detail.name')}</h3>
-    <h3>신분</h3>
+    <h4>신분</h4>
     <dl class="fact-list">
       <dt>이름</dt><dd>${requiredText(detail.name, 'detail.name')}</dd>
       <dt>Realm</dt><dd>${requiredText(detail.realmName, 'detail.realmName')}</dd>
@@ -600,7 +616,7 @@ function renderDisputeCandidates(idx, state, dispute) {
       <dt>활동</dt><dd>${requiredText(detail.activityLabel, 'detail.activityLabel')}</dd>
       ${detail.roleLabel ? `<dt>역할</dt><dd>${escapeHtml(detail.roleLabel)}</dd>` : ''}
     </dl>
-    <h3>권리</h3>
+    <h4>권리</h4>
     <dl class="fact-list">
       <dt>권리 유형</dt><dd>${requiredText(detail.rights.standingLabel, 'detail.rights.standingLabel')}</dd>
       <dt>출처</dt><dd>${requiredText(detail.rights.origin, 'detail.rights.origin')}</dd>
@@ -609,9 +625,9 @@ function renderDisputeCandidates(idx, state, dispute) {
       ${detail.rights.evidenceLabel ? `<dt>근거</dt><dd>${escapeHtml(detail.rights.evidenceLabel)}</dd>` : ''}
       <dt>세대 거리</dt><dd>${escapeHtml(String(detail.rights.generationDistance))}</dd>
     </dl>
-    <h3>혈통</h3>
+    <h4>혈통</h4>
     <p>${requiredText(detail.lineage.label, 'detail.lineage.label')}</p>
-    <h3>정치적 맥락</h3>
+    <h4>정치적 맥락</h4>
     ${
       detail.politicalContext.length
         ? `<ul class="relation-list">${detail.politicalContext
@@ -619,9 +635,9 @@ function renderDisputeCandidates(idx, state, dispute) {
             .join('')}</ul>`
         : '<p class="empty-note">표시할 정치적 맥락이 없습니다.</p>'
     }
-    <h3>약속</h3>
+    <h4>약속</h4>
     ${promiseHtml}
-    <h3>정보</h3>
+    <h4>정보</h4>
     ${infoHtml}
   `;
 }
@@ -679,7 +695,7 @@ function renderDisputeHouses(idx, state, dispute) {
     throw new Error('계승 가문 상세 투영이 불완전합니다');
   }
   const infoHtml = detail.information.length
-    ? infoCardsHtml(detail.information)
+    ? infoCardsHtml(detail.information, 'h5')
     : '<p class="empty-note">표시할 정보가 없습니다.</p>';
   const promiseHtml = detail.promises.length
     ? `<ul class="promise-list">${detail.promises
@@ -697,7 +713,7 @@ function renderDisputeHouses(idx, state, dispute) {
       <dt>종교</dt><dd>${requiredText(detail.religionName, 'houseDetail.religionName')}</dd>
       <dt>다수 정체성</dt><dd>${requiredText(detail.identityStance, 'houseDetail.identityStance')}</dd>
     </dl>
-    <h3>가문 관계</h3>
+    <h4>가문 관계</h4>
     ${
       detail.relations.length
         ? `<ul class="relation-list">${detail.relations
@@ -705,9 +721,9 @@ function renderDisputeHouses(idx, state, dispute) {
             .join('')}</ul>`
         : '<p class="empty-note">기록된 가문 관계가 없습니다.</p>'
     }
-    <h3>${escapeHtml(detail.promiseLabel)}</h3>
+    <h4>${escapeHtml(detail.promiseLabel)}</h4>
     ${promiseHtml}
-    <h3>${escapeHtml(detail.informationLabel)}</h3>
+    <h4>${escapeHtml(detail.informationLabel)}</h4>
     ${infoHtml}
   `;
 }
@@ -715,7 +731,6 @@ function renderDisputeHouses(idx, state, dispute) {
 function renderSuccessionWorkspace(idx, state) {
   const workspace = document.getElementById('succession-workspace');
   const banner = document.getElementById('world-context-banner');
-  const pageTitle = document.getElementById('page-title');
   hideLegacyCrisisPanel();
   const realmId = disputeRealmId(idx);
   const dispute = realmId ? getSuccessionDisputeView(idx, realmId) : null;
@@ -723,7 +738,7 @@ function renderSuccessionWorkspace(idx, state) {
   if (!dispute) {
     workspace.hidden = true;
     if (banner) banner.hidden = true;
-    if (pageTitle) pageTitle.textContent = '세계 관찰';
+    setPageTitle('세계 관찰', 'h1');
     document.getElementById('dispute-crisis').innerHTML = '';
     document.getElementById('dispute-candidate-list').innerHTML = '';
     document.getElementById('dispute-candidate-detail').innerHTML = '';
@@ -733,7 +748,7 @@ function renderSuccessionWorkspace(idx, state) {
   }
   workspace.hidden = false;
   if (banner) banner.hidden = false;
-  if (pageTitle) pageTitle.textContent = '세계 맥락';
+  setPageTitle('세계 맥락', 'h2');
   assertRenderableDispute(dispute);
   renderDisputeCrisis(dispute);
   renderDisputeCandidates(idx, state, dispute);

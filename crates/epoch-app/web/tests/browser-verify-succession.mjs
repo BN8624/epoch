@@ -372,6 +372,31 @@ try {
       worldInMain: snapshot.worldInMain,
     }),
   );
+  const headings = await cdp.eval(`(function(){
+    var nodes=document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    var out=[];
+    for(var i=0;i<nodes.length;i++){
+      var el=nodes[i];
+      if(el.closest('[hidden]')) continue;
+      out.push({level:Number(el.tagName.slice(1)),text:el.innerText.trim(),id:el.id});
+    }
+    return out;
+  })()`);
+  const h1s = headings.filter((item) => item.level === 1);
+  check('single-h1', h1s.length === 1, JSON.stringify(h1s));
+  check('h1-is-dispute', h1s[0]?.id === 'dispute-crisis-heading', JSON.stringify(h1s[0]));
+  check('h1-first-heading', headings[0]?.level === 1, JSON.stringify(headings.slice(0, 3)));
+  check(
+    'page-title-demoted',
+    headings.some((item) => item.id === 'page-title' && item.level === 2),
+    JSON.stringify(headings.filter((item) => item.id === 'page-title')),
+  );
+  check(
+    'no-heading-level-skip',
+    headings.every((item, index) => index === 0 || item.level - headings[index - 1].level <= 1),
+    JSON.stringify(headings.map((item) => item.level)),
+  );
+
   check('workspace-visible', snapshot.workspaceHidden === false, String(snapshot.workspaceHidden));
   check('world-context-visible', snapshot.contextBannerHidden === false, String(snapshot.contextBannerHidden));
   check('world-context-title', snapshot.contextHeading === '세계 맥락', snapshot.contextHeading);
