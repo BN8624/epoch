@@ -330,11 +330,44 @@ try {
     panel: document.getElementById('crisis-panel'),
     hidden: document.getElementById('crisis-panel')?.hidden ?? true,
     text: document.getElementById('succession-crisis')?.innerText?.trim() || '',
+    workspaceHidden: document.getElementById('succession-workspace')?.hidden ?? true,
+    disputeCards: document.querySelectorAll('.dispute-candidate-card').length,
+    pageText: document.body.innerText,
   })`);
   check(
     'no-crisis-on-plain-export',
     Boolean(crisisHidden.hidden) && crisisHidden.text === '',
-    JSON.stringify(crisisHidden),
+    JSON.stringify({ hidden: crisisHidden.hidden, text: crisisHidden.text }),
+  );
+  check(
+    'no-succession-workspace',
+    Boolean(crisisHidden.workspaceHidden) && crisisHidden.disputeCards === 0,
+    JSON.stringify({
+      workspaceHidden: crisisHidden.workspaceHidden,
+      disputeCards: crisisHidden.disputeCards,
+    }),
+  );
+  const plainHeadings = await cdp.eval(`(function(){
+    var nodes=document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+    var out=[];
+    for(var i=0;i<nodes.length;i++){
+      var el=nodes[i];
+      if(el.closest('[hidden]')) continue;
+      out.push({level:Number(el.tagName.slice(1)),id:el.id});
+    }
+    return out;
+  })()`);
+  const plainH1s = plainHeadings.filter((item) => item.level === 1);
+  check(
+    'plain-single-h1',
+    plainH1s.length === 1 && plainH1s[0].id === 'page-title',
+    JSON.stringify(plainH1s),
+  );
+
+  check(
+    'no-vacancy-copy',
+    !crisisHidden.pageText.includes('통치자 공석') && !crisisHidden.pageText.includes('후보 A'),
+    'plain export showed succession copy',
   );
 
   await cdp.eval(`document.querySelector('[data-territory-id="${otherCapital}"]')?.click()`);
