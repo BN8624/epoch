@@ -18,7 +18,7 @@ pub fn run_epoch_lab(args: &[&str]) -> Output {
         .expect("cargo run -p epoch-lab")
 }
 
-/// 주문서가 상수로 고정한 M0~M2.2 CLI 출력.
+/// 주문서가 상수로 고정한 M0~M2.3 CLI 출력.
 ///
 /// 부분 문자열 검사는 `claims=120`이 `claims=12`를 통과시키고 `bytes=` 뒤에 숫자가
 /// 없어도 통과하므로 사용하지 않는다. 여기 항목은 전부 stdout 전체와 비교한다.
@@ -81,6 +81,14 @@ pub const CLI_EXACT_REGRESSION: &[([&str; 2], &str)] = &[
         "CLAIM_PROPAGATION_OK seed=2 original=12 derived=6 restored_sources=6 direct_sources=0 distance1=6 derived_supporting=6 bytes=70982",
     ),
     (
+        ["succession-check", "1"],
+        "SUCCESSION_OK seed=1 realms=6 candidates=18 direct_winners=6 restored_winners=0 derived_winners=0 vacancies=6 realm01_bytes=71915",
+    ),
+    (
+        ["succession-check", "2"],
+        "SUCCESSION_OK seed=2 realms=6 candidates=18 direct_winners=6 restored_winners=0 derived_winners=0 vacancies=6 realm01_bytes=71914",
+    ),
+    (
         ["replay-check", "1"],
         "DETERMINISM_OK seed=1 events=5 bytes=7353",
     ),
@@ -122,7 +130,7 @@ pub fn assert_cli_exact(args: &[&str], expected: &str) {
     );
 }
 
-/// 고정된 M0~M2.2 exact 회귀 전체를 검사한다.
+/// 고정된 M0~M2.3 exact 회귀 전체를 검사한다.
 ///
 /// 마일스톤마다 이 배터리를 새 파일에 다시 작성하지 않는다. 최상위 계층 테스트
 /// 하나에서만 호출해 같은 CLI를 여러 번 실행하지 않도록 한다.

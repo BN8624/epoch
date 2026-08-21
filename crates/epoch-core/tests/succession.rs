@@ -16,8 +16,6 @@ use std::collections::{BTreeMap, BTreeSet};
 mod common;
 
 const SEEDS: [u64; 5] = [0, 1, 2, 42, u64::MAX];
-const SUCCESSION_CHECK_1: &str = "SUCCESSION_OK seed=1 realms=6 candidates=18 direct_winners=6 restored_winners=0 derived_winners=0 vacancies=6 realm01_bytes=71915";
-const SUCCESSION_CHECK_2: &str = "SUCCESSION_OK seed=2 realms=6 candidates=18 direct_winners=6 restored_winners=0 derived_winners=0 vacancies=6 realm01_bytes=71914";
 
 fn person_by_id(
     world: &epoch_core::ClaimPropagationWorld,
@@ -701,16 +699,8 @@ fn cli_succession_1_realm01_matches_generated_world() {
     common::assert_cli_json_eq(&["succession", "1", "realm-01"], &expected);
 }
 
-#[test]
-fn cli_succession_check_1_and_2_print_exact_ok() {
-    common::assert_cli_exact(&["succession-check", "1"], SUCCESSION_CHECK_1);
-    common::assert_cli_exact(&["succession-check", "2"], SUCCESSION_CHECK_2);
-}
-
-#[test]
-fn existing_m0_to_m22_exact_regression() {
-    common::assert_cli_exact_regression();
-}
+// succession-check 1/2를 포함한 M0~M2.3 exact 회귀는
+// common::CLI_EXACT_REGRESSION이 한 곳에서 담당한다.
 
 #[test]
 fn succession_world_deserializes_as_succession_world() {
