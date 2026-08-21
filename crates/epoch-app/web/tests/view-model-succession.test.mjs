@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
   buildIndexes,
+  generationLabel,
   getCrisisView,
   getRealmView,
   getSuccessionCandidateDetail,
@@ -237,17 +238,82 @@ test('seed 1 dispute candidate and house details keep privacy and actual relatio
     const candB = getSuccessionCandidateDetail(idx, 'realm-01', 'person-019');
     const candC = getSuccessionCandidateDetail(idx, 'realm-01', 'person-022');
     assert.ok(candA && candB && candC);
-    assert.equal(candA.name, idx.personById['person-006'].name);
-    assert.equal(candA.realmName, dispute.realmName);
-    assert.equal(candA.houseName, idx.houseById['house-01'].name);
+
+    const claimById = Object.fromEntries(idx.layers.rights.claims.map((claim) => [claim.id, claim]));
+    const derivedById = Object.fromEntries(
+      succession.pre_succession_world.propagation.derived_claims.map((item) => [item.id, item]),
+    );
+
+    function assertCandidateIdentity(detail, personId) {
+      const person = idx.personById[personId];
+      const house = idx.houseById[person.house_id];
+      const identity = idx.personIdentityById[personId];
+      assert.equal(detail.name, person.name);
+      assert.equal(detail.realmId, 'realm-01');
+      assert.equal(detail.realmName, idx.realmById['realm-01'].name);
+      assert.equal(detail.houseId, person.house_id);
+      assert.equal(detail.houseName, house.name);
+      assert.equal(detail.generation, person.generation);
+      assert.equal(detail.generationLabel, generationLabel(person.generation));
+      assert.equal(detail.cultureName, idx.cultureById[identity.culture_id].name);
+      assert.equal(detail.religionName, idx.religionById[identity.religion_id].name);
+      assert.equal(
+        detail.activityLabel,
+        idx.activeByPerson[personId] ? '적극적 정치 행위자' : '보조 인물',
+      );
+      assert.equal(detail.unresolved, false);
+    }
+
+    assertCandidateIdentity(candA, 'person-006');
     assert.equal(candA.rights.origin, 'original');
     assert.equal(candA.rights.claimRecordId, 'claim-01');
+    assert.equal(candA.rights.priority, 'direct_strong_original');
+    assert.equal(candA.rights.standingLabel, '강한 직계 권리');
+    assert.equal(candA.rights.priorityLabel, '강한 직계 권리');
+    assert.equal(candA.rights.evidenceLabel, '직전 통치자의 알려진 자녀');
+    assert.equal(
+      candA.rights.generationDistance,
+      succession.transition.candidates.find((item) => item.person_id === 'person-006')
+        .generation_distance,
+    );
     assert.equal(candA.lineage.kind, 'direct');
     assert.equal(candA.lineage.label, '직전 통치자의 알려진 자녀');
+
+    assertCandidateIdentity(candB, 'person-019');
+    assert.equal(candB.houseId, 'house-03');
+    assert.equal(candB.houseName, idx.houseById['house-03'].name);
+    assert.equal(candB.rights.origin, 'original');
+    assert.equal(candB.rights.claimRecordId, 'claim-02');
+    assert.equal(candB.rights.priority, 'restored_contested_original');
+    assert.equal(candB.rights.standingLabel, '논쟁 중인 복권 권리');
+    assert.equal(candB.rights.evidenceLabel, '옛 계통을 뒷받침하는 역사 기록 보유');
+    assert.equal(candB.lineage.kind, 'direct');
+    assert.equal(candB.lineage.label, '복권 계통의 현 가문 수장');
+    assert.equal(idx.houseById['house-03'].head_person_id, 'person-019');
+    assert.equal(dispute.candidateB.isRestoredLineHead, true);
+    const restoredClaim = claimById['claim-02'];
+    assert.ok(restoredClaim);
+    assert.equal(restoredClaim.claimant_person_id, 'person-019');
+    const restoredEvidence = (restoredClaim.evidence_record_ids ?? []).map(
+      (id) => idx.evidenceById[id],
+    );
+    assert.equal(
+      restoredEvidence.some((record) => record?.kind === 'restored_lineage'),
+      true,
+    );
+
+    assertCandidateIdentity(candC, 'person-022');
+    assert.equal(candC.houseName, idx.houseById[idx.personById['person-022'].house_id].name);
     assert.equal(candC.rights.origin, 'derived');
+    assert.equal(candC.rights.claimRecordId, 'derived-claim-01');
     assert.equal(candC.rights.sourceClaimId, 'claim-02');
+    assert.equal(candC.rights.priority, 'restored_contested_derived');
+    assert.equal(candC.rights.standingLabel, '혈통을 따라 파생된 복권 권리');
+    assert.equal(candC.rights.generationDistance, derivedById['derived-claim-01'].generation_distance);
     assert.equal(candC.lineage.kind, 'derived');
     assert.equal(candC.lineage.sourcePersonId, 'person-019');
+    assert.equal(candC.lineage.sourcePersonName, idx.personById['person-019'].name);
+    assert.equal(candC.lineage.sourceClaimId, 'claim-02');
     assert.match(candC.lineage.label, /자녀로서/);
 
     for (const detail of [candA, candB, candC]) {
@@ -312,28 +378,51 @@ test('seed 1 dispute candidate and house details keep privacy and actual relatio
       assert.equal(house03Ids.has(item.id), false);
     }
 
-    const expectedPartners = idx.layers.context.relations
-      .filter((rel) => rel.house_a_id === 'house-01' || rel.house_b_id === 'house-01')
-      .map((rel) => (rel.house_a_id === 'house-01' ? rel.house_b_id : rel.house_a_id))
-      .sort();
-    assert.deepEqual(
-      house01.relations.map((rel) => rel.otherHouseId).sort(),
-      expectedPartners,
+    const kindLabel = { cooperative: '협력', rival: '대립', competitive: '경쟁' };
+    const rawRelations = idx.layers.context.relations.filter(
+      (rel) => rel.house_a_id === 'house-01' || rel.house_b_id === 'house-01',
     );
+    assert.equal(house01.relations.length, rawRelations.length);
+    for (const rel of rawRelations) {
+      const otherHouseId = rel.house_a_id === 'house-01' ? rel.house_b_id : rel.house_a_id;
+      const projected = house01.relations.find(
+        (item) => item.otherHouseId === otherHouseId && item.kind === rel.kind,
+      );
+      assert.ok(projected, `missing relation ${rel.kind} ${otherHouseId}`);
+      assert.equal(projected.kind, rel.kind);
+      assert.equal(projected.kindLabel, kindLabel[rel.kind]);
+      assert.equal(
+        projected.sentence,
+        `${idx.houseById['house-01'].name}와 ${idx.houseById[otherHouseId].name}는 ${kindLabel[rel.kind]} 관계입니다.`,
+      );
+    }
     assert.equal(getSuccessionDisputeView(idx, 'realm-02'), null);
   } finally {
     fs.rmSync(outDir, { recursive: true, force: true });
   }
 });
 
+function personsOf(world) {
+  return world.context_world.political.dynastic.population.persons;
+}
+
+function housesOf(world) {
+  return world.context_world.political.dynastic.population.houses;
+}
+
+function assertNoFakeName(value, rawId) {
+  assert.notEqual(value, rawId);
+  assert.notEqual(value, '기록 없음');
+}
+
 test('missing succession person is not replaced with a fake display name', () => {
   const { outDir, world, succession } = exportSuccession(1, 'realm-01');
   try {
     const broken = structuredClone(world);
-    broken.context_world.political.dynastic.population.persons =
-      broken.context_world.political.dynastic.population.persons.filter(
-        (person) => person.id !== 'person-006',
-      );
+    personsOf(broken).splice(
+      personsOf(broken).findIndex((person) => person.id === 'person-006'),
+      1,
+    );
     const idx = buildIndexes(broken, succession);
     const dispute = getSuccessionDisputeView(idx, 'realm-01');
     const candA = dispute.candidates.find((item) => item.slot === 'A');
@@ -342,6 +431,110 @@ test('missing succession person is not replaced with a fake display name', () =>
     assert.equal(candA.personName, null);
     assert.equal(candA.unresolved, true);
     assert.equal(dispute.unresolved, true);
+    assertNoFakeName(candA.personName, 'person-006');
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('malformed claim, evidence, house, and slot counts stay unresolved', () => {
+  const { outDir, world, succession } = exportSuccession(1, 'realm-01');
+  try {
+    function disputeOf(nextWorld = world, nextSuccession = succession) {
+      return getSuccessionDisputeView(buildIndexes(nextWorld, nextSuccession), 'realm-01');
+    }
+
+    const missingOriginal = structuredClone(world);
+    missingOriginal.rights.claims = missingOriginal.rights.claims.filter(
+      (claim) => claim.id !== 'claim-01',
+    );
+    const noOriginal = disputeOf(missingOriginal);
+    const noOriginalA = noOriginal.candidates.find((item) => item.slot === 'A');
+    assert.equal(noOriginalA.unresolved, true);
+    assert.equal(noOriginal.unresolved, true);
+    assert.equal(noOriginalA.personName, personsOf(world).find((p) => p.id === 'person-006').name);
+    assert.notEqual(noOriginalA.personName, 'person-006');
+
+    const missingDerived = structuredClone(succession);
+    missingDerived.pre_succession_world.propagation.derived_claims =
+      missingDerived.pre_succession_world.propagation.derived_claims.filter(
+        (item) => item.id !== 'derived-claim-01',
+      );
+    const noDerived = disputeOf(world, missingDerived);
+    const noDerivedC = noDerived.candidates.find((item) => item.slot === 'C');
+    assert.equal(noDerivedC.unresolved, true);
+    assert.equal(noDerived.unresolved, true);
+    assert.equal(noDerivedC.provenance.sentence, null);
+    assert.equal(noDerivedC.provenance.sourcePersonId, null);
+    assert.notEqual(noDerivedC.provenance.sourcePersonName, 'person-019');
+
+    const missingSource = structuredClone(world);
+    missingSource.rights.claims = missingSource.rights.claims.filter(
+      (claim) => claim.id !== 'claim-02',
+    );
+    const noSource = disputeOf(missingSource);
+    const noSourceC = noSource.candidates.find((item) => item.slot === 'C');
+    const noSourceB = noSource.candidates.find((item) => item.slot === 'B');
+    assert.equal(noSourceC.unresolved, true);
+    assert.equal(noSourceB.unresolved, true);
+    assert.equal(noSource.unresolved, true);
+    assert.equal(noSourceC.provenance.sourcePersonId, null);
+    assert.equal(noSourceC.provenance.sentence, null);
+    assert.equal(noSourceC.provenance.sourcePersonName, null);
+
+    const missingEvidence = structuredClone(world);
+    const restored = missingEvidence.rights.claims.find((claim) => claim.id === 'claim-02');
+    const evidenceIds = new Set(restored.evidence_record_ids ?? []);
+    restored.evidence_record_ids = [];
+    missingEvidence.rights.evidence_records = missingEvidence.rights.evidence_records.filter(
+      (record) => !evidenceIds.has(record.id),
+    );
+    const noEvidence = disputeOf(missingEvidence);
+    const noEvidenceB = noEvidence.candidates.find((item) => item.slot === 'B');
+    assert.equal(noEvidenceB.unresolved, true);
+    assert.equal(noEvidence.unresolved, true);
+    assert.equal(noEvidenceB.evidenceLabel, null);
+    assert.notEqual(noEvidenceB.evidenceLabel, '연결된 역사 기록 없음');
+    assert.notEqual(noEvidenceB.personName, 'person-019');
+
+    const missingHouse = structuredClone(world);
+    housesOf(missingHouse).splice(
+      housesOf(missingHouse).findIndex((house) => house.id === 'house-03'),
+      1,
+    );
+    const noHouse = disputeOf(missingHouse);
+    const noHouseB = noHouse.candidates.find((item) => item.slot === 'B');
+    assert.equal(noHouseB.houseName, null);
+    assert.equal(noHouseB.unresolved, true);
+    assert.equal(noHouse.unresolved, true);
+    assert.notEqual(noHouseB.houseName, 'house-03');
+    assert.equal(noHouse.houses.length, 2);
+
+    const extraCandidate = structuredClone(succession);
+    extraCandidate.transition.candidates = [
+      ...extraCandidate.transition.candidates,
+      { ...extraCandidate.transition.candidates[0], person_id: 'person-007' },
+    ];
+    const four = disputeOf(world, extraCandidate);
+    assert.equal(four.unresolved, true);
+    assert.equal(four.candidates.length, 3);
+
+    const duplicatePriority = structuredClone(succession);
+    duplicatePriority.transition.candidates[2] = {
+      ...duplicatePriority.transition.candidates[2],
+      priority: 'direct_strong_original',
+      claim_origin: 'original',
+    };
+    const dup = disputeOf(world, duplicatePriority);
+    assert.equal(dup.unresolved, true);
+
+    const extraHouse = structuredClone(world);
+    const copied = structuredClone(housesOf(extraHouse).find((house) => house.id === 'house-02'));
+    copied.id = 'house-99';
+    housesOf(extraHouse).push(copied);
+    const fourHouses = disputeOf(extraHouse);
+    assert.equal(fourHouses.houses.length, 4);
+    assert.equal(fourHouses.unresolved, true);
   } finally {
     fs.rmSync(outDir, { recursive: true, force: true });
   }

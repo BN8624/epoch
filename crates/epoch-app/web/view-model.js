@@ -540,59 +540,113 @@ export function getSuccessionVisiblePromises(idx, personId) {
     }));
 }
 
-function derivedProvenance(idx, candidate) {
-  const derived = idx.derivedById?.[candidate.claim_record_id];
-  if (!derived) {
-    return {
-      sourceClaimId: null,
-      sourcePersonId: null,
-      sourcePersonName: null,
-      viaParentPersonId: null,
-      isKnownChildOfSource: false,
-      sentence: null,
-    };
-  }
-  const sourceClaim = idx.claimById[derived.source_claim_id];
-  const sourcePersonId = sourceClaim?.claimant_person_id ?? derived.via_parent_person_id ?? null;
-  const sourcePerson = sourcePersonId ? idx.personById[sourcePersonId] : null;
-  const child = idx.personById[candidate.person_id];
-  const isKnownChildOfSource = Boolean(
-    sourcePersonId && (child?.known_parent_ids ?? []).includes(sourcePersonId),
-  );
-  const sourcePersonName = resolvedName(sourcePerson);
+function emptyDerivedProvenance(overrides = {}) {
   return {
-    sourceClaimId: derived.source_claim_id ?? null,
-    sourcePersonId,
-    sourcePersonName,
-    viaParentPersonId: derived.via_parent_person_id ?? null,
-    isKnownChildOfSource,
-    sentence:
-      sourcePersonName && isKnownChildOfSource
-        ? `${sourcePersonName}의 자녀로서 복권 권리가 한 세대 전파됨`
-        : null,
+    sourceClaimId: null,
+    sourcePersonId: null,
+    sourcePersonName: null,
+    viaParentPersonId: null,
+    isKnownChildOfSource: false,
+    sentence: null,
+    unresolved: true,
+    ...overrides,
   };
 }
 
-function projectDisputeCandidate(idx, candidate, formerPersonId) {
+function originalClaimForCandidate(idx, candidate) {
+  if (candidate.claim_origin !== 'original') {
+    return { claim: null, ok: true };
+  }
+  const claim = idx.claimById[candidate.claim_record_id];
+  if (!claim) return { claim: null, ok: false };
+  if (claim.claimant_person_id !== candidate.person_id) return { claim, ok: false };
+  return { claim, ok: true };
+}
+
+function restoredEvidenceForClaim(idx, claim) {
+  if (!claim) return { ok: false, label: null };
+  const evidenceIds = claim.evidence_record_ids ?? [];
+  const records = evidenceIds.map((id) => idx.evidenceById?.[id]).filter(Boolean);
+  if (records.length !== evidenceIds.length || records.length === 0) {
+    return { ok: false, label: null };
+  }
+  if (records.some((record) => record.kind === 'restored_lineage')) {
+    return { ok: true, label: '옛 계통을 뒷받침하는 역사 기록 보유' };
+  }
+  return { ok: false, label: null };
+}
+
+function derivedProvenance(idx, candidate, realmId) {
+  const derived = idx.derivedById?.[candidate.claim_record_id];
+  if (!derived) return emptyDerivedProvenance();
+  const sourceClaim = derived.source_claim_id ? idx.claimById[derived.source_claim_id] : null;
+  if (!sourceClaim) {
+    return emptyDerivedProvenance({
+      sourceClaimId: derived.source_claim_id ?? null,
+      viaParentPersonId: derived.via_parent_person_id ?? null,
+    });
+  }
+  const sourcePersonId = sourceClaim.claimant_person_id ?? null;
+  const sourcePerson = sourcePersonId ? idx.personById[sourcePersonId] : null;
+  const child = idx.personById[candidate.person_id];
+  const viaParentPersonId = derived.via_parent_person_id ?? null;
+  const sourcePersonName = resolvedName(sourcePerson);
+  const realmOk = derived.realm_id === realmId && sourceClaim.realm_id === realmId;
+  const derivedClaimantOk = derived.claimant_person_id === candidate.person_id;
+  const claimantOk = Boolean(sourcePersonId && sourcePersonName);
+  const viaOk = Boolean(viaParentPersonId && viaParentPersonId === sourcePersonId);
+  const isKnownChildOfSource = Boolean(
+    sourcePersonId && (child?.known_parent_ids ?? []).includes(sourcePersonId),
+  );
+  const unresolved = !realmOk || !derivedClaimantOk || !claimantOk || !viaOk || !isKnownChildOfSource;
+  return {
+    sourceClaimId: derived.source_claim_id,
+    sourcePersonId,
+    sourcePersonName,
+    viaParentPersonId,
+    isKnownChildOfSource,
+    sentence:
+      unresolved || !sourcePersonName
+        ? null
+        : `${sourcePersonName}의 자녀로서 복권 권리가 한 세대 전파됨`,
+    unresolved,
+  };
+}
+
+function projectDisputeCandidate(idx, candidate, formerPersonId, realmId) {
   const slotInfo = SUCCESSION_SLOT_BY_PRIORITY[candidate.priority];
   const person = idx.personById[candidate.person_id];
   const house = idx.houseById[candidate.house_id];
-  const claim =
-    candidate.claim_origin === 'derived'
-      ? null
-      : idx.claimById[candidate.claim_record_id] ?? null;
+  const original = originalClaimForCandidate(idx, candidate);
   const provenance =
-    candidate.claim_origin === 'derived' ? derivedProvenance(idx, candidate) : null;
+    candidate.claim_origin === 'derived' ? derivedProvenance(idx, candidate, realmId) : null;
   const sourceClaim = provenance?.sourceClaimId ? idx.claimById[provenance.sourceClaimId] : null;
-  const evidenceClaim = claim ?? sourceClaim;
   const isKnownChildOfFormer = Boolean(
     formerPersonId && (person?.known_parent_ids ?? []).includes(formerPersonId),
   );
   const isRestoredLineHead = Boolean(house && house.head_person_id === candidate.person_id);
-  const evidenceLabel = evidenceClaim
-    ? claimEvidenceLabel(evidenceClaim, idx.evidenceById)
-    : null;
+  const restoredEvidence =
+    candidate.priority === 'restored_contested_original'
+      ? restoredEvidenceForClaim(idx, original.claim)
+      : null;
+  let evidenceLabel = null;
+  if (candidate.priority === 'direct_strong_original') {
+    evidenceLabel = isKnownChildOfFormer ? '직전 통치자의 알려진 자녀' : null;
+  } else if (candidate.priority === 'restored_contested_original') {
+    evidenceLabel = restoredEvidence?.label ?? null;
+  } else if (sourceClaim && !provenance?.unresolved) {
+    evidenceLabel = claimEvidenceLabel(sourceClaim, idx.evidenceById);
+  }
   const actor = idx.activeByPerson[candidate.person_id];
+  const unresolved = Boolean(
+    !slotInfo ||
+      !resolvedName(person) ||
+      !resolvedName(house) ||
+      !original.ok ||
+      provenance?.unresolved ||
+      (candidate.priority === 'direct_strong_original' && !isKnownChildOfFormer) ||
+      (candidate.priority === 'restored_contested_original' && !restoredEvidence?.ok),
+  );
   return {
     slot: slotInfo?.slot ?? null,
     slotLabel: slotInfo?.slotLabel ?? null,
@@ -614,14 +668,9 @@ function projectDisputeCandidate(idx, candidate, formerPersonId) {
     isPriority: candidate.priority === 'direct_strong_original',
     isKnownChildOfFormer,
     isRestoredLineHead,
-    evidenceLabel:
-      candidate.priority === 'direct_strong_original'
-        ? isKnownChildOfFormer
-          ? '직전 통치자의 알려진 자녀'
-          : null
-        : evidenceLabel,
+    evidenceLabel,
     provenance,
-    unresolved: !resolvedName(person) || !resolvedName(house) || !slotInfo,
+    unresolved,
   };
 }
 
@@ -670,9 +719,17 @@ export function getSuccessionDisputeView(idx, realmId) {
   if (!transition) return null;
   const realm = idx.realmById[transition.realm_id];
   const former = idx.personById[transition.death.person_id];
-  const mapped = (transition.candidates ?? []).map((candidate) =>
-    projectDisputeCandidate(idx, candidate, transition.death.person_id),
+  const rawCandidates = transition.candidates ?? [];
+  const mapped = rawCandidates.map((candidate) =>
+    projectDisputeCandidate(idx, candidate, transition.death.person_id, transition.realm_id),
   );
+  const slotCounts = { A: 0, B: 0, C: 0 };
+  let unknownPriority = false;
+  for (const candidate of rawCandidates) {
+    const slot = SUCCESSION_SLOT_BY_PRIORITY[candidate.priority]?.slot;
+    if (!slot) unknownPriority = true;
+    else slotCounts[slot] += 1;
+  }
   const bySlot = Object.create(null);
   for (const candidate of mapped) {
     if (candidate.slot) bySlot[candidate.slot] = candidate;
@@ -681,6 +738,8 @@ export function getSuccessionDisputeView(idx, realmId) {
   const houses = (idx.housesByRealm[transition.realm_id] ?? []).map((house) =>
     projectDisputeHouse(idx, house, transition.realm_id),
   );
+  const slotsUnique =
+    !unknownPriority && slotCounts.A === 1 && slotCounts.B === 1 && slotCounts.C === 1;
   return {
     realmId: transition.realm_id,
     realmName: resolvedName(realm),
@@ -698,8 +757,11 @@ export function getSuccessionDisputeView(idx, realmId) {
     unresolved:
       !resolvedName(realm) ||
       !resolvedName(former) ||
+      rawCandidates.length !== 3 ||
+      !slotsUnique ||
       candidates.length !== 3 ||
       candidates.some((item) => item.unresolved) ||
+      houses.length !== 3 ||
       houses.some((item) => item.unresolved),
   };
 }
@@ -725,7 +787,11 @@ export function getSuccessionCandidateDetail(idx, realmId, personId) {
         }
       : {
           kind: 'direct',
-          label: card.isKnownChildOfFormer ? '직전 통치자의 알려진 자녀' : null,
+          label: card.isKnownChildOfFormer
+            ? '직전 통치자의 알려진 자녀'
+            : card.isRestoredLineHead
+              ? '복권 계통의 현 가문 수장'
+              : null,
           sourcePersonId: dispute.formerIncumbentPersonId,
           sourcePersonName: dispute.formerIncumbentName,
           sourceClaimId: null,
